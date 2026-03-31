@@ -1,0 +1,10 @@
+<linker>
+  <assembly fullname="Google.Protobuf" preserve="all"/>
+  <assembly fullname="Grpc.Core.Api" preserve="all"/>
+  <assembly fullname="Grpc.Net.Client" preserve="all"/>
+  <assembly fullname="Grpc.Net.Common" preserve="all"/>
+  <assembly fullname="Microsoft.Extensions.Logging.Abstractions" preserve="all"/>
+  <assembly fullname="System.Buffers" preserve="all"/>
+  <assembly fullname="System.Diagnostics.DiagnosticSource" preserve="all"/>
+  <assembly fullname="System.Memory" preserve="all"/>
+</linker>
