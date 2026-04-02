@@ -41,18 +41,20 @@ namespace Xr {
             "AyADKAJCAhABEgsKA2ZwcxgEIAEoBRIWCg5zY2FsaW5nX2ZhY3RvchgFIAEo",
             "BRIUCgx0aW1lc3RhbXBfbnMYBiABKAMiQgoQQ2FtZXJhSW50cmluc2ljcxIK",
             "CgJmeBgBIAEoAhIKCgJmeRgCIAEoAhIKCgJjeBgDIAEoAhIKCgJjeRgEIAEo",
-            "AiL+AQoZVXBzdHJlYW1TeW5jTWVzc2FnZV9xdWVzdBIdCgVpbWFnZRgBIAEo",
+            "AiLxAgoZVXBzdHJlYW1TeW5jTWVzc2FnZV9xdWVzdBIdCgVpbWFnZRgBIAEo",
             "CzIOLnhyLlZpZGVvRnJhbWUSDQoFZGVwdGgYAiABKAwSEAoEcG9zZRgDIAMo",
             "AkICEAESKAoKaW50cmluc2ljcxgEIAEoCzIULnhyLkNhbWVyYUludHJpbnNp",
             "Y3MSEwoLaW1hZ2Vfd2lkdGgYBSABKAUSFAoMaW1hZ2VfaGVpZ2h0GAYgASgF",
             "EhMKC2RlcHRoX3dpZHRoGAcgASgFEhQKDGRlcHRoX2hlaWdodBgIIAEoBRIL",
-            "CgNmcHMYCSABKAUSFAoMdGltZXN0YW1wX25zGAogASgDMvABCglYclNlcnZp",
-            "Y2USUQoZVXBsb2FkU3luY01lc3NhZ2VfZGF0YXNldBIfLnhyLlVwc3RyZWFt",
-            "U3luY01lc3NhZ2VfZGF0YXNldBoPLnhyLlZpZGVvU3RhdHVzIgAoARJBChFV",
-            "cGxvYWRTeW5jTWVzc2FnZRIXLnhyLlVwc3RyZWFtU3luY01lc3NhZ2UaDy54",
-            "ci5WaWRlb1N0YXR1cyIAKAESTQoXVXBsb2FkU3luY01lc3NhZ2VfcXVlc3QS",
-            "HS54ci5VcHN0cmVhbVN5bmNNZXNzYWdlX3F1ZXN0Gg8ueHIuVmlkZW9TdGF0",
-            "dXMiACgBYgZwcm90bzM="));
+            "CgNmcHMYCSABKAUSFAoMdGltZXN0YW1wX25zGAogASgDEhQKDGRlcHRoX25l",
+            "YXJfehgLIAEoAhITCgtkZXB0aF9mYXJfehgMIAEoAhIuChBkZXB0aF9pbnRy",
+            "aW5zaWNzGA0gASgLMhQueHIuQ2FtZXJhSW50cmluc2ljcxIWCgpkZXB0aF9w",
+            "b3NlGA4gAygCQgIQATLwAQoJWHJTZXJ2aWNlElEKGVVwbG9hZFN5bmNNZXNz",
+            "YWdlX2RhdGFzZXQSHy54ci5VcHN0cmVhbVN5bmNNZXNzYWdlX2RhdGFzZXQa",
+            "Dy54ci5WaWRlb1N0YXR1cyIAKAESQQoRVXBsb2FkU3luY01lc3NhZ2USFy54",
+            "ci5VcHN0cmVhbVN5bmNNZXNzYWdlGg8ueHIuVmlkZW9TdGF0dXMiACgBEk0K",
+            "F1VwbG9hZFN5bmNNZXNzYWdlX3F1ZXN0Eh0ueHIuVXBzdHJlYW1TeW5jTWVz",
+            "c2FnZV9xdWVzdBoPLnhyLlZpZGVvU3RhdHVzIgAoAWIGcHJvdG8z"));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
           new pbr::GeneratedClrTypeInfo(null, null, new pbr::GeneratedClrTypeInfo[] {
@@ -62,7 +64,7 @@ namespace Xr {
             new pbr::GeneratedClrTypeInfo(typeof(global::Xr.UpstreamSyncMessage), global::Xr.UpstreamSyncMessage.Parser, new[]{ "Image", "DepthArr", "Pose", "Fps" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::Xr.UpstreamSyncMessage_dataset), global::Xr.UpstreamSyncMessage_dataset.Parser, new[]{ "Image", "Depth", "Pose", "Fps", "ScalingFactor", "TimestampNs" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::Xr.CameraIntrinsics), global::Xr.CameraIntrinsics.Parser, new[]{ "Fx", "Fy", "Cx", "Cy" }, null, null, null, null),
-            new pbr::GeneratedClrTypeInfo(typeof(global::Xr.UpstreamSyncMessage_quest), global::Xr.UpstreamSyncMessage_quest.Parser, new[]{ "Image", "Depth", "Pose", "Intrinsics", "ImageWidth", "ImageHeight", "DepthWidth", "DepthHeight", "Fps", "TimestampNs" }, null, null, null, null)
+            new pbr::GeneratedClrTypeInfo(typeof(global::Xr.UpstreamSyncMessage_quest), global::Xr.UpstreamSyncMessage_quest.Parser, new[]{ "Image", "Depth", "Pose", "Intrinsics", "ImageWidth", "ImageHeight", "DepthWidth", "DepthHeight", "Fps", "TimestampNs", "DepthNearZ", "DepthFarZ", "DepthIntrinsics", "DepthPose" }, null, null, null, null)
           }));
     }
     #endregion
@@ -2402,6 +2404,8 @@ namespace Xr {
       timestampNs_ = other.timestampNs_;
       depthNearZ_ = other.depthNearZ_;
       depthFarZ_ = other.depthFarZ_;
+      depthIntrinsics_ = other.depthIntrinsics_ != null ? other.depthIntrinsics_.Clone() : null;
+      depthPose_ = other.depthPose_.Clone();
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -2427,7 +2431,7 @@ namespace Xr {
     public const int DepthFieldNumber = 2;
     private pb::ByteString depth_ = pb::ByteString.Empty;
     /// <summary>
-    /// float32 metric depth, raw bytes
+    /// R16G16B16A16_SFloat raw bytes (8 bytes/pixel, depth in R channel)
     /// </summary>
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
@@ -2542,6 +2546,9 @@ namespace Xr {
     /// <summary>Field number for the "depth_near_z" field.</summary>
     public const int DepthNearZFieldNumber = 11;
     private float depthNearZ_;
+    /// <summary>
+    /// Near clipping plane (meters)
+    /// </summary>
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public float DepthNearZ {
@@ -2554,6 +2561,9 @@ namespace Xr {
     /// <summary>Field number for the "depth_far_z" field.</summary>
     public const int DepthFarZFieldNumber = 12;
     private float depthFarZ_;
+    /// <summary>
+    /// Far clipping plane (meters)
+    /// </summary>
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public float DepthFarZ {
@@ -2561,6 +2571,35 @@ namespace Xr {
       set {
         depthFarZ_ = value;
       }
+    }
+
+    /// <summary>Field number for the "depth_intrinsics" field.</summary>
+    public const int DepthIntrinsicsFieldNumber = 13;
+    private global::Xr.CameraIntrinsics depthIntrinsics_;
+    /// <summary>
+    /// Per-frame depth camera intrinsics (from FOV tangents)
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Xr.CameraIntrinsics DepthIntrinsics {
+      get { return depthIntrinsics_; }
+      set {
+        depthIntrinsics_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "depth_pose" field.</summary>
+    public const int DepthPoseFieldNumber = 14;
+    private static readonly pb::FieldCodec<float> _repeated_depthPose_codec
+        = pb::FieldCodec.ForFloat(114);
+    private readonly pbc::RepeatedField<float> depthPose_ = new pbc::RepeatedField<float>();
+    /// <summary>
+    /// 4x4 depth camera-to-world matrix (16 floats, right-handed)
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public pbc::RepeatedField<float> DepthPose {
+      get { return depthPose_; }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -2590,6 +2629,8 @@ namespace Xr {
       if (TimestampNs != other.TimestampNs) return false;
       if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(DepthNearZ, other.DepthNearZ)) return false;
       if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(DepthFarZ, other.DepthFarZ)) return false;
+      if (!object.Equals(DepthIntrinsics, other.DepthIntrinsics)) return false;
+      if(!depthPose_.Equals(other.depthPose_)) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -2609,6 +2650,8 @@ namespace Xr {
       if (TimestampNs != 0L) hash ^= TimestampNs.GetHashCode();
       if (DepthNearZ != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(DepthNearZ);
       if (DepthFarZ != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(DepthFarZ);
+      if (depthIntrinsics_ != null) hash ^= DepthIntrinsics.GetHashCode();
+      hash ^= depthPose_.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -2672,6 +2715,11 @@ namespace Xr {
         output.WriteRawTag(101);
         output.WriteFloat(DepthFarZ);
       }
+      if (depthIntrinsics_ != null) {
+        output.WriteRawTag(106);
+        output.WriteMessage(DepthIntrinsics);
+      }
+      depthPose_.WriteTo(output, _repeated_depthPose_codec);
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -2727,6 +2775,11 @@ namespace Xr {
         output.WriteRawTag(101);
         output.WriteFloat(DepthFarZ);
       }
+      if (depthIntrinsics_ != null) {
+        output.WriteRawTag(106);
+        output.WriteMessage(DepthIntrinsics);
+      }
+      depthPose_.WriteTo(ref output, _repeated_depthPose_codec);
       if (_unknownFields != null) {
         _unknownFields.WriteTo(ref output);
       }
@@ -2771,6 +2824,10 @@ namespace Xr {
       if (DepthFarZ != 0F) {
         size += 1 + 4;
       }
+      if (depthIntrinsics_ != null) {
+        size += 1 + pb::CodedOutputStream.ComputeMessageSize(DepthIntrinsics);
+      }
+      size += depthPose_.CalculateSize(_repeated_depthPose_codec);
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
       }
@@ -2823,6 +2880,13 @@ namespace Xr {
       if (other.DepthFarZ != 0F) {
         DepthFarZ = other.DepthFarZ;
       }
+      if (other.depthIntrinsics_ != null) {
+        if (depthIntrinsics_ == null) {
+          DepthIntrinsics = new global::Xr.CameraIntrinsics();
+        }
+        DepthIntrinsics.MergeFrom(other.DepthIntrinsics);
+      }
+      depthPose_.Add(other.depthPose_);
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
 
@@ -2897,6 +2961,18 @@ namespace Xr {
             DepthFarZ = input.ReadFloat();
             break;
           }
+          case 106: {
+            if (depthIntrinsics_ == null) {
+              DepthIntrinsics = new global::Xr.CameraIntrinsics();
+            }
+            input.ReadMessage(DepthIntrinsics);
+            break;
+          }
+          case 114:
+          case 117: {
+            depthPose_.AddEntriesFrom(input, _repeated_depthPose_codec);
+            break;
+          }
         }
       }
     #endif
@@ -2969,6 +3045,18 @@ namespace Xr {
           }
           case 101: {
             DepthFarZ = input.ReadFloat();
+            break;
+          }
+          case 106: {
+            if (depthIntrinsics_ == null) {
+              DepthIntrinsics = new global::Xr.CameraIntrinsics();
+            }
+            input.ReadMessage(DepthIntrinsics);
+            break;
+          }
+          case 114:
+          case 117: {
+            depthPose_.AddEntriesFrom(ref input, _repeated_depthPose_codec);
             break;
           }
         }

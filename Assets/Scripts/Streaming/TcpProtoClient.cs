@@ -170,6 +170,25 @@ namespace SemanticXR.Streaming
                 };
             }
 
+            // Depth camera intrinsics (from FOV tangents)
+            if (f.HasDepthIntrinsics)
+            {
+                msg.DepthIntrinsics = new CameraIntrinsics
+                {
+                    Fx = f.DepthFx, Fy = f.DepthFy, Cx = f.DepthCx, Cy = f.DepthCy,
+                };
+
+                // Depth camera pose: Unity left-handed -> right-handed (same conversion as head pose)
+                var dm = f.DepthPose;
+                msg.DepthPose.AddRange(new[]
+                {
+                     dm.m00,  dm.m01, -dm.m02,  dm.m03,
+                     dm.m10,  dm.m11, -dm.m12,  dm.m13,
+                    -dm.m20, -dm.m21,  dm.m22, -dm.m23,
+                     dm.m30,  dm.m31, -dm.m32,  dm.m33,
+                });
+            }
+
             // Serialize to bytes
             byte[] data = msg.ToByteArray();
 

@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using Meta.XR;
 using Meta.XR.EnvironmentDepth;
 using SemanticXR.Encoding;
@@ -23,11 +24,30 @@ namespace SemanticXR.Streaming
 
         // Depth capture
         EnvironmentDepthManager _depthManager;
-        byte[] _latestDepthBytes;
-        int _depthWidth, _depthHeight;
-        float _depthNearZ, _depthFarZ;
-        bool _depthReady;
         bool _depthReadbackPending;
+
+        // Depth camera intrinsics & pose (from EnvironmentDepthManager via reflection)
+        FieldInfo _frameDescField;
+
+        // --- Snapshot: captured atomically at readback REQUEST time ---
+        // This ensures depth bytes, RGB, head pose, depth pose, depth intrinsics,
+        // and zbuffer params all correspond to the SAME moment in time.
+        struct DepthSnapshot
+        {
+            public byte[] DepthBytes;
+            public int DepthWidth, DepthHeight;
+            public float NearZ, FarZ;               // ZBufferParams
+            public Matrix4x4 HeadPose;               // Camera.main at request time
+            public float DepthFx, DepthFy, DepthCx, DepthCy;
+            public Matrix4x4 DepthCameraPose;
+            public bool HasDepthIntrinsics;
+            // RGB captured at the same instant as depth
+            public byte[] RgbNv12;
+            public int RgbWidth, RgbHeight;
+            public float RgbFx, RgbFy, RgbCx, RgbCy;
+            public bool Valid;
+        }
+        DepthSnapshot _latestSnapshot;
 
         public bool IsConnected => _tcp?.IsConnected == true;
         public int FrameCount => _tcp?.SentFrames ?? 0;
@@ -87,51 +107,179 @@ namespace SemanticXR.Streaming
                 _depthManager = go.AddComponent<EnvironmentDepthManager>();
                 Debug.LogWarning("[Orchestrator] Created EnvironmentDepthManager");
             }
+            // Cache reflection access to internal frameDescriptors field
+            _frameDescField = typeof(EnvironmentDepthManager).GetField(
+                "frameDescriptors",
+                BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+            if (_frameDescField != null)
+                Debug.LogWarning("[Orchestrator] Found frameDescriptors field via reflection");
+            else
+                Debug.LogWarning("[Orchestrator] Could not find frameDescriptors — depth intrinsics unavailable");
+
             Debug.LogWarning("[Orchestrator] Depth capture setup complete");
+        }
+
+        /// <summary>
+        /// Extract depth camera intrinsics and pose from EnvironmentDepthManager's
+        /// internal frameDescriptors via reflection. Returns values for left eye (index 0).
+        /// </summary>
+        bool TryGetDepthCameraParams(out float dfx, out float dfy, out float dcx, out float dcy,
+                                      out Matrix4x4 depthPose, int depthW, int depthH)
+        {
+            dfx = dfy = dcx = dcy = 0;
+            depthPose = Matrix4x4.identity;
+
+            if (_depthManager == null || _frameDescField == null) return false;
+
+            try
+            {
+                var descs = _frameDescField.GetValue(_depthManager) as Array;
+                if (descs == null || descs.Length == 0) return false;
+
+                var desc = descs.GetValue(0);
+                var descType = desc.GetType();
+
+                float fovLeft = (float)descType.GetField("fovLeftAngleTangent",
+                    BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public).GetValue(desc);
+                float fovRight = (float)descType.GetField("fovRightAngleTangent",
+                    BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public).GetValue(desc);
+                float fovTop = (float)descType.GetField("fovTopAngleTangent",
+                    BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public).GetValue(desc);
+                float fovDown = (float)descType.GetField("fovDownAngleTangent",
+                    BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public).GetValue(desc);
+
+                Vector3 poseLoc = (Vector3)descType.GetField("createPoseLocation",
+                    BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public).GetValue(desc);
+                Quaternion poseRot = (Quaternion)descType.GetField("createPoseRotation",
+                    BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public).GetValue(desc);
+
+                if (fovLeft <= 0 || fovRight <= 0) return false;
+
+                float w = depthW > 0 ? depthW : 320;
+                float h = depthH > 0 ? depthH : 320;
+
+                dfx = w / (fovRight + fovLeft);
+                dfy = h / (fovTop + fovDown);
+                dcx = fovLeft * dfx;
+                dcy = fovTop * dfy;  // cy from top after server's vertical flip
+
+                depthPose = Matrix4x4.TRS(poseLoc, poseRot, Vector3.one);
+
+                if (_capturedCount <= 3)
+                    Debug.LogWarning($"[Depth] FOV tangents: L={fovLeft:F3} R={fovRight:F3} T={fovTop:F3} D={fovDown:F3} " +
+                                     $"=> fx={dfx:F1} fy={dfy:F1} cx={dcx:F1} cy={dcy:F1} " +
+                                     $"pose=({poseLoc.x:F3},{poseLoc.y:F3},{poseLoc.z:F3})");
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                if (_capturedCount <= 3)
+                    Debug.LogWarning($"[Depth] Reflection failed: {ex.Message}");
+                return false;
+            }
         }
 
         void TryReadbackDepth()
         {
             if (_depthReadbackPending) return;
 
-            // Use preprocessed depth — it has R16G16B16A16_SFloat format that AsyncGPUReadback supports
-            // (the raw _EnvironmentDepthTexture is a native OpenXR texture with "None" format)
             var depthTex = Shader.GetGlobalTexture("_PreprocessedEnvironmentDepthTexture") as RenderTexture;
             if (depthTex == null || !depthTex.IsCreated()) return;
 
+            // ---- SNAPSHOT everything at REQUEST time ----
+            // The GPU readback captures the depth texture content at this moment.
+            // We ALSO capture RGB, pose, intrinsics NOW so they all match.
+
+            // Capture RGB at this instant (before async readback)
+            byte[] rgbNv12 = null;
+            int rgbW = 0, rgbH = 0;
+            float rgbFx = 0, rgbFy = 0, rgbCx = 0, rgbCy = 0;
+
+            if (_cam != null && _cam.IsPlaying)
+            {
+                var res = _cam.CurrentResolution;
+                if (res.x > 0 && res.y > 0)
+                {
+                    try
+                    {
+                        var colors = _cam.GetColors();
+                        if (colors.IsCreated && colors.Length > 0)
+                        {
+                            rgbW = res.x;
+                            rgbH = res.y;
+                            rgbNv12 = RgbaToNv12(colors, rgbW, rgbH);
+
+                            var intr = _cam.Intrinsics;
+                            if (intr.FocalLength.x > 0)
+                            {
+                                rgbFx = intr.FocalLength.x;
+                                rgbFy = intr.FocalLength.y;
+                                rgbCx = intr.PrincipalPoint.x;
+                                rgbCy = intr.PrincipalPoint.y;
+                            }
+                        }
+                    }
+                    catch { /* passthrough not ready yet */ }
+                }
+            }
+
             _depthReadbackPending = true;
 
-            // Meta's _EnvironmentDepthZBufferParams from EnvironmentDepthUtils.ComputeNdcToLinearDepthParameters:
-            //   x = invDepthFactor = -2*near (infinite far) or -2*far*near/(far-near) (finite far)
-            //   y = depthOffset    = -1       (infinite far) or -(far+near)/(far-near) (finite far)
-            //   z, w = always 0
-            // Conversion: ndc = zbuf_value * 2 - 1; linear_depth = x / (ndc + y)
             var zbuf = Shader.GetGlobalVector("_EnvironmentDepthZBufferParams");
-            _depthNearZ = zbuf.x;  // send raw x (invDepthFactor) for server-side conversion
-            _depthFarZ = zbuf.y;   // send raw y (depthOffset)
+            float nearZ = zbuf.x;
+            float farZ = zbuf.y;
+
+            // Head pose at this instant
+            var headPose = Camera.main != null ? Camera.main.transform.localToWorldMatrix : Matrix4x4.identity;
+
+            // Depth camera intrinsics & pose at this instant
+            int texW = depthTex.width, texH = depthTex.height;
+            bool hasDepthIntr = TryGetDepthCameraParams(
+                out float dfx, out float dfy, out float dcx, out float dcy,
+                out Matrix4x4 depthCamPose, texW, texH);
 
             if (_capturedCount <= 3)
                 Debug.LogWarning($"[Depth] ZBufferParams=({zbuf.x:G}, {zbuf.y:G}, {zbuf.z:G}, {zbuf.w:G})");
 
-            // Always readback — the texture object doesn't change but its contents do each frame
             AsyncGPUReadback.Request(depthTex, 0, 0, depthTex.width, 0, depthTex.height, 0, 1,
                 request =>
                 {
                     _depthReadbackPending = false;
 
-                    if (request.hasError)
-                    {
-                        return;
-                    }
+                    if (request.hasError) return;
 
                     var data = request.GetData<byte>();
-                    _depthWidth = request.width;
-                    _depthHeight = request.height;
-                    _latestDepthBytes = data.ToArray();
-                    _depthReady = true;
+
+                    // Store the complete snapshot: depth + RGB + pose + intrinsics from request time
+                    _latestSnapshot = new DepthSnapshot
+                    {
+                        DepthBytes = data.ToArray(),
+                        DepthWidth = request.width,
+                        DepthHeight = request.height,
+                        NearZ = nearZ,
+                        FarZ = farZ,
+                        HeadPose = headPose,
+                        DepthFx = dfx,
+                        DepthFy = dfy,
+                        DepthCx = dcx,
+                        DepthCy = dcy,
+                        DepthCameraPose = depthCamPose,
+                        HasDepthIntrinsics = hasDepthIntr,
+                        RgbNv12 = rgbNv12,
+                        RgbWidth = rgbW,
+                        RgbHeight = rgbH,
+                        RgbFx = rgbFx,
+                        RgbFy = rgbFy,
+                        RgbCx = rgbCx,
+                        RgbCy = rgbCy,
+                        Valid = rgbNv12 != null,
+                    };
 
                     if (_capturedCount <= 3 || _capturedCount % 30 == 0)
-                        Debug.LogWarning($"[Depth] Readback: {_depthWidth}x{_depthHeight}, {_latestDepthBytes.Length} bytes, near={_depthNearZ:F3} far={_depthFarZ:F3}");
+                        Debug.LogWarning($"[Depth] Readback: {request.width}x{request.height}, " +
+                                         $"{_latestSnapshot.DepthBytes.Length} bytes, near={nearZ:F3} far={farZ:F3}" +
+                                         $", rgb={rgbW}x{rgbH}");
                 });
         }
 
@@ -191,62 +339,57 @@ namespace SemanticXR.Streaming
             if (Time.time - _lastLogTime > 5f)
             {
                 _lastLogTime = Time.time;
-                Debug.LogWarning($"[Pipeline] captured={_capturedCount} encoderOut={_encoderOutCount} sent={_tcp?.SentFrames} queue={_tcp?.QueuedFrames} depth={_depthWidth}x{_depthHeight} connected={_tcp?.IsConnected}");
+                Debug.LogWarning($"[Pipeline] captured={_capturedCount} encoderOut={_encoderOutCount} " +
+                                 $"sent={_tcp?.SentFrames} queue={_tcp?.QueuedFrames} " +
+                                 $"depth={_latestSnapshot.DepthWidth}x{_latestSnapshot.DepthHeight} connected={_tcp?.IsConnected}");
             }
         }
 
         void CaptureFrame()
         {
-            var res = _cam.CurrentResolution;
-            if (res.x <= 0 || res.y <= 0) return;
+            // Everything comes from the snapshot — RGB, depth, pose, intrinsics
+            // are all captured at the same instant (depth readback request time).
+            if (!_latestSnapshot.Valid) return;
+
+            int w = _latestSnapshot.RgbWidth;
+            int h = _latestSnapshot.RgbHeight;
+            if (w <= 0 || h <= 0) return;
 
             if (!_encoderReady)
             {
-                _encoder = new HardwareH265Encoder(res.x, res.y, 8_000_000, 30);
+                _encoder = new HardwareH265Encoder(w, h, 8_000_000, 30);
                 _encoder.Start();
                 _encoderReady = true;
-                Debug.LogWarning($"[Orchestrator] Encoder init: {res.x}x{res.y}");
-            }
-
-            NativeArray<Color32> colors;
-            try { colors = _cam.GetColors(); }
-            catch { return; }
-            if (!colors.IsCreated || colors.Length == 0) return;
-
-            int w = res.x, h = res.y;
-            byte[] nv12 = RgbaToNv12(colors, w, h);
-
-            var pose = Camera.main != null ? Camera.main.transform.localToWorldMatrix : Matrix4x4.identity;
-
-            float fx = 0, fy = 0, cx = 0, cy = 0;
-            var intr = _cam.Intrinsics;
-            if (intr.FocalLength.x > 0)
-            {
-                fx = intr.FocalLength.x;
-                fy = intr.FocalLength.y;
-                cx = intr.PrincipalPoint.x;
-                cy = intr.PrincipalPoint.y;
+                Debug.LogWarning($"[Orchestrator] Encoder init: {w}x{h}");
             }
 
             var frame = new FrameData
             {
-                H265Bytes = nv12,
+                H265Bytes = _latestSnapshot.RgbNv12,
                 ImageWidth = w,
                 ImageHeight = h,
-                Pose = pose,
-                Fx = fx, Fy = fy, Cx = cx, Cy = cy,
+                Fx = _latestSnapshot.RgbFx,
+                Fy = _latestSnapshot.RgbFy,
+                Cx = _latestSnapshot.RgbCx,
+                Cy = _latestSnapshot.RgbCy,
                 FrameNumber = _frameNumber++,
                 TimestampNs = (long)(Time.realtimeSinceStartupAsDouble * 1_000_000_000),
+                Pose = _latestSnapshot.HeadPose,
+                DepthBytes = _latestSnapshot.DepthBytes,
+                DepthWidth = _latestSnapshot.DepthWidth,
+                DepthHeight = _latestSnapshot.DepthHeight,
+                DepthNearZ = _latestSnapshot.NearZ,
+                DepthFarZ = _latestSnapshot.FarZ,
             };
 
-            // Attach latest depth if available
-            if (_depthReady && _latestDepthBytes != null)
+            if (_latestSnapshot.HasDepthIntrinsics)
             {
-                frame.DepthBytes = _latestDepthBytes;
-                frame.DepthWidth = _depthWidth;
-                frame.DepthHeight = _depthHeight;
-                frame.DepthNearZ = _depthNearZ;
-                frame.DepthFarZ = _depthFarZ;
+                frame.HasDepthIntrinsics = true;
+                frame.DepthFx = _latestSnapshot.DepthFx;
+                frame.DepthFy = _latestSnapshot.DepthFy;
+                frame.DepthCx = _latestSnapshot.DepthCx;
+                frame.DepthCy = _latestSnapshot.DepthCy;
+                frame.DepthPose = _latestSnapshot.DepthCameraPose;
             }
 
             _encoder.Enqueue(frame);

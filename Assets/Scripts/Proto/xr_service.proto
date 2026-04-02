@@ -78,6 +78,8 @@ message UpstreamSyncMessage_quest {
   int64 timestamp_ns = 10;
   float depth_near_z = 11;                  // Near clipping plane (meters)
   float depth_far_z = 12;                   // Far clipping plane (meters)
+  CameraIntrinsics depth_intrinsics = 13;   // Per-frame depth camera intrinsics (from FOV tangents)
+  repeated float depth_pose = 14 [packed=true]; // 4x4 depth camera-to-world matrix (16 floats, right-handed)
 }
 
 service XrService {

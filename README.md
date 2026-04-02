@@ -157,6 +157,42 @@ Assets/
 | `TcpProtoClient.cs` | Alternative TCP-based protobuf streaming client |
 | `ManifestPostProcessor.cs` | Patches Android manifest and app name at build time |
 
+## Depth Capture and 3D Reconstruction
+
+### Depth Pipeline
+
+The app captures depth from Meta's Environment Depth API (`_PreprocessedEnvironmentDepthTexture`) alongside RGB from the Passthrough Camera API. Key challenges solved:
+
+1. **Temporal synchronization**: `AsyncGPUReadback` is asynchronous — depth bytes arrive 1-2 frames after the request. All data (RGB, depth, pose, intrinsics) is captured at readback *request* time and bundled into a `DepthSnapshot` struct, so every field in a frame corresponds to the same moment.
+
+2. **Depth intrinsics**: The depth sensor has a different FOV (~94-98°) than the RGB camera (~73°). Intrinsics are extracted from Meta's internal `EnvironmentDepthFrameDesc` FOV tangent fields via reflection:
+   ```
+   fx = width / (tanRight + tanLeft)
+   fy = height / (tanTop + tanDown)
+   cx = tanLeft * fx
+   cy = tanTop * fy
+   ```
+
+3. **Coordinate conventions**: Unity (left-handed) → right-handed conversion in `TcpProtoClient` via `S @ M @ S` where `S = diag(1,1,-1,1)`. Server-side reconstruction converts from OpenGL camera convention (Y-up, Z-backward) to OpenCV (Y-down, Z-forward).
+
+4. **Depth camera pose**: Separate from head pose — extracted from `EnvironmentDepthFrameDesc.createPoseLocation/Rotation` and sent alongside the head pose.
+
+### Protobuf Fields
+
+The `UpstreamSyncMessage_quest` proto includes:
+- `depth_intrinsics` (field 13): Depth camera fx, fy, cx, cy derived from FOV tangents
+- `depth_pose` (field 14): 4x4 depth camera-to-world matrix (row-major, right-handed)
+
+### Server-Side Reconstruction
+
+A companion debug server (`debug_server/`) can reconstruct 3D point clouds or TSDF meshes from captured sessions. See `reconstruct.py` (point cloud) and `reconstruct_tsdf.py` (volumetric TSDF fusion).
+
+### Known Limitations
+
+- `_PreprocessedEnvironmentDepthTexture` contains soft occlusion statistics (not raw depth), though the R channel conversion `nearZ / R` yields equivalent linear depth.
+- Depth resolution is low (320x320).
+- RGB and depth come from separate Meta APIs with no unified synchronized capture — synchronization is best-effort by co-capturing in the same frame.
+
 ## gRPC Server
 
 This project streams data **from** the Quest to a gRPC server. The server is not included in this repo. To receive the stream, implement a gRPC server that handles the `XrService.UploadSyncMessage_quest` RPC defined in [`xr_service.proto`](Assets/Scripts/Proto/xr_service.proto).

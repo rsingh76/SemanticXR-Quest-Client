@@ -209,5 +209,10 @@ namespace SemanticXR.Streaming
         public int FrameNumber;
         public long TimestampNs;
         public float DepthNearZ, DepthFarZ;
+        // Depth camera intrinsics (computed from FOV tangents)
+        public float DepthFx, DepthFy, DepthCx, DepthCy;
+        // Depth camera pose (camera-to-world, Unity convention)
+        public Matrix4x4 DepthPose;
+        public bool HasDepthIntrinsics;
     }
 }
