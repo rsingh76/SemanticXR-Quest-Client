@@ -150,17 +150,25 @@ namespace SemanticXR.Streaming
                 TimestampNs = f.TimestampNs,
                 DepthNearZ = f.DepthNearZ,
                 DepthFarZ = f.DepthFarZ,
+                RgbTimestampNs = f.RgbTimestampNs,
+                DepthTimestampNs = f.DepthTimestampNs,
             };
 
-            // Pose: Unity left-handed -> OpenXR right-handed
-            var m = f.Pose;
-            msg.Pose.AddRange(new[]
+            // Helper: Unity left-handed -> right-handed (negate Z column & row)
+            static float[] LhToRh(Matrix4x4 m) => new[]
             {
                  m.m00,  m.m01, -m.m02,  m.m03,
                  m.m10,  m.m11, -m.m12,  m.m13,
                 -m.m20, -m.m21,  m.m22, -m.m23,
                  m.m30,  m.m31, -m.m32,  m.m33,
-            });
+            };
+
+            // DEPRECATED 'pose' field (alias of head_pose) — kept for server backward compat
+            msg.Pose.AddRange(LhToRh(f.HeadPose));
+            msg.HeadPose.AddRange(LhToRh(f.HeadPose));
+
+            if (f.HasRgbCameraPose)
+                msg.RgbCameraPose.AddRange(LhToRh(f.RgbCameraPose));
 
             if (f.Fx > 0)
             {
@@ -178,15 +186,14 @@ namespace SemanticXR.Streaming
                     Fx = f.DepthFx, Fy = f.DepthFy, Cx = f.DepthCx, Cy = f.DepthCy,
                 };
 
-                // Depth camera pose: Unity left-handed -> right-handed (same conversion as head pose)
-                var dm = f.DepthPose;
-                msg.DepthPose.AddRange(new[]
+                msg.DepthFovTangents.AddRange(new[]
                 {
-                     dm.m00,  dm.m01, -dm.m02,  dm.m03,
-                     dm.m10,  dm.m11, -dm.m12,  dm.m13,
-                    -dm.m20, -dm.m21,  dm.m22, -dm.m23,
-                     dm.m30,  dm.m31, -dm.m32,  dm.m33,
+                    f.DepthFovTanLeft, f.DepthFovTanRight,
+                    f.DepthFovTanTop,  f.DepthFovTanDown,
                 });
+
+                // Depth camera pose: Unity LH -> RH
+                msg.DepthPose.AddRange(LhToRh(f.DepthCameraPose));
             }
 
             // Serialize to bytes

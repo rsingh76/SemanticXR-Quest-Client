@@ -175,7 +175,19 @@ The app captures depth from Meta's Environment Depth API (`_PreprocessedEnvironm
 
 3. **Coordinate conventions**: Unity (left-handed) → right-handed conversion in `TcpProtoClient` via `S @ M @ S` where `S = diag(1,1,-1,1)`. Server-side reconstruction converts from OpenGL camera convention (Y-up, Z-backward) to OpenCV (Y-down, Z-forward).
 
-4. **Depth camera pose**: Separate from head pose — extracted from `EnvironmentDepthFrameDesc.createPoseLocation/Rotation` and sent alongside the head pose.
+4. **Depth camera pose**: Separate from head pose — extracted from `EnvironmentDepthFrameDesc.createPoseLocation/Rotation` and sent alongside the head pose. This pose is in **OpenXR tracking space**, not Unity world space — for scenes with no XR origin offset they coincide; otherwise the server must apply the tracking-space transform.
+
+5. **Explicit poses**: Three distinct 4×4 matrices are sent on the wire — `head_pose` (Camera.main eye center, Unity world), `rgb_camera_pose` (`PassthroughCameraAccess.GetCameraPose()`, physical RGB sensor with lens offset, Unity world), and `depth_pose` (depth sensor, OpenXR tracking space). Use `rgb_camera_pose` for projecting RGB pixels and `depth_pose` for unprojecting depth pixels — they are NOT interchangeable.
+
+6. **Sensor timestamps & clock domains**: RGB and depth come from independent Meta subsystems with **different clocks**:
+   - `rgb_timestamp_ns` — Android Camera2 `SENSOR_TIMESTAMP`, `CLOCK_BOOTTIME` nanoseconds (read via reflection from `PassthroughCameraAccess._timestampNsMonotonic`).
+   - `depth_timestamp_ns` — `EnvironmentDepthFrameDesc.createTime`, OpenXR `XrTime` / `CLOCK_MONOTONIC` nanoseconds.
+
+   These cannot be directly compared without offset-correcting the suspend gap between BOOTTIME and MONOTONIC. The orchestrator does **best-effort co-capture** in the same `Update()` tick (≲40ms apart at 25 FPS) and does NOT currently reject mismatched pairs by timestamp diff.
+
+7. **OVRCameraRig requirement (Meta SDK quirk)**: `DepthFrameDesc.createTime` returns 0 unless an `OVRCameraRig` exists in the scene. `StreamingOrchestrator` auto-spawns a hidden, disabled rig at startup if one is missing, so depth timestamps are always populated without affecting tracking or rendering (which still use OpenXR / `Camera.main`).
+
+8. **Best-effort sync, not atomic**: The internal `CoCapturedFrame` struct bundles RGB + depth + poses + timestamps captured in the same Update() tick. This is approximate — not an atomic hardware-synchronized capture. We do not yet drop frames whose RGB/depth timestamps drift apart; that's a TODO once the BOOTTIME↔MONOTONIC offset correction is implemented.
 
 ### Protobuf Fields
 
