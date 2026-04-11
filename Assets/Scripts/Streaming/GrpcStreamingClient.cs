@@ -155,15 +155,20 @@ namespace SemanticXR.Streaming
                 TimestampNs = f.TimestampNs,
             };
 
-            // Pose: Unity left-handed -> OpenXR right-handed (negate Z)
-            var m = f.Pose;
-            msg.Pose.AddRange(new[]
+            // Helper: Unity left-handed -> right-handed (negate Z column & row)
+            static float[] LhToRh(Matrix4x4 m) => new[]
             {
                  m.m00,  m.m01, -m.m02,  m.m03,
                  m.m10,  m.m11, -m.m12,  m.m13,
                 -m.m20, -m.m21,  m.m22, -m.m23,
                  m.m30,  m.m31, -m.m32,  m.m33,
-            });
+            };
+
+            msg.Pose.AddRange(LhToRh(f.HeadPose));
+            msg.HeadPose.AddRange(LhToRh(f.HeadPose));
+
+            if (f.HasRgbCameraPose)
+                msg.RgbCameraPose.AddRange(LhToRh(f.RgbCameraPose));
 
             if (f.Fx > 0)
             {
