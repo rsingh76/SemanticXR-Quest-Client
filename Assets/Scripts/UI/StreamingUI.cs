@@ -33,7 +33,7 @@ namespace SemanticXR.UI
         TextMeshProUGUI _fpsLabel;
 
         Button _connectBtn;
-        TextMeshProUGUI _errorText, _statusText, _statsText;
+        TextMeshProUGUI _errorText, _statusText, _statsText, _diagText, _validationText;
 
         TouchScreenKeyboard _keyboard;
         string _editField;
@@ -50,6 +50,10 @@ namespace SemanticXR.UI
             _orchestrator.OnConnected += ShowStreaming;
             _orchestrator.OnDisconnected += ShowConnect;
             _orchestrator.OnError += ShowError;
+
+            // On-device projection sanity test (auto-disables after 10 frames)
+            gameObject.AddComponent<SemanticXR.Diagnostics.ProjectionSanityTest>();
+
             BuildUI();
         }
 
@@ -125,10 +129,21 @@ namespace SemanticXR.UI
 
             _streamingPanel = Mk.Panel(bg.transform, "Streaming", Color.clear);
             Mk.Stretch(_streamingPanel, 20);
-            Mk.Label(_streamingPanel.transform, "Streaming", new Vector2(0, 60), 26, new Color(0.3f, 0.9f, 0.4f));
-            _statusText = Mk.Label(_streamingPanel.transform, "", new Vector2(0, 20), 17, Color.white);
-            _statsText = Mk.Label(_streamingPanel.transform, "", new Vector2(0, -10), 17, new Color(0.7f, 0.7f, 0.75f));
-            Mk.Btn(_streamingPanel.transform, "Disconnect", new Vector2(0, -65), new Vector2(200, 45), new Color(0.6f, 0.15f, 0.15f), 22, () => _orchestrator.Disconnect());
+            Mk.Label(_streamingPanel.transform, "Streaming", new Vector2(0, 155), 26, new Color(0.3f, 0.9f, 0.4f));
+            _statusText = Mk.Label(_streamingPanel.transform, "", new Vector2(0, 120), 16, Color.white);
+            _statsText = Mk.Label(_streamingPanel.transform, "", new Vector2(0, 95), 16, new Color(0.7f, 0.7f, 0.75f));
+
+            // Validation status (green = passed, red = failed)
+            _validationText = Mk.Label(_streamingPanel.transform, "Validating...", new Vector2(0, 65), 14, new Color(0.9f, 0.9f, 0.3f), TextAlignmentOptions.TopLeft, 560);
+            _validationText.enableWordWrapping = true;
+            _validationText.GetComponent<RectTransform>().sizeDelta = new Vector2(560, 40);
+
+            // Diagnostics: drop counters
+            _diagText = Mk.Label(_streamingPanel.transform, "", new Vector2(0, 10), 13, new Color(0.6f, 0.6f, 0.65f), TextAlignmentOptions.TopLeft, 560);
+            _diagText.enableWordWrapping = true;
+            _diagText.GetComponent<RectTransform>().sizeDelta = new Vector2(560, 100);
+
+            Mk.Btn(_streamingPanel.transform, "Disconnect", new Vector2(0, -120), new Vector2(200, 45), new Color(0.6f, 0.15f, 0.15f), 22, () => _orchestrator.Disconnect());
             _streamingPanel.SetActive(false);
         }
 
@@ -173,7 +188,7 @@ namespace SemanticXR.UI
         {
             _connectPanel.SetActive(false);
             _streamingPanel.SetActive(true);
-            _canvasRect.sizeDelta = new Vector2(400, 200);
+            _canvasRect.sizeDelta = new Vector2(650, 420);
             Position();
         }
         void ShowError(string msg) { _errorText.text = msg; _connectBtn.interactable = true; }
@@ -201,7 +216,31 @@ namespace SemanticXR.UI
                 _statusText.text = _orchestrator.IsConnected
                     ? $"Connected to {_orchestrator.ServerTarget}"
                     : $"Connecting to {_orchestrator.ServerTarget}...";
-                _statsText.text = $"Frames: {_orchestrator.FrameCount}  |  Queue: {_orchestrator.QueuedFrames}";
+                _statsText.text = $"Sent: {_orchestrator.FrameCount}  |  Queue: {_orchestrator.QueuedFrames}";
+
+                // Validation status
+                var valErr = _orchestrator.ValidationError;
+                if (valErr != null)
+                {
+                    _validationText.text = $"VALIDATION FAILED:\n{valErr}";
+                    _validationText.color = new Color(1f, 0.3f, 0.3f);
+                }
+                else if (_orchestrator.PoseMethod != "unknown")
+                {
+                    _validationText.text = $"Validated | Pose: {_orchestrator.PoseMethod}";
+                    _validationText.color = new Color(0.3f, 0.9f, 0.4f);
+                }
+
+                // Drop counters
+                int totalDropped = _orchestrator.TotalDropped;
+                var dropColor = totalDropped > 0 ? new Color(1f, 0.7f, 0.3f) : new Color(0.5f, 0.5f, 0.55f);
+                _diagText.color = dropColor;
+                _diagText.text = $"Dropped: {totalDropped}" +
+                    (totalDropped > 0 ? $"  (pose={_orchestrator.DroppedNoPose}" +
+                        $" ts={_orchestrator.DroppedNoTimestamp}" +
+                        $" intr={_orchestrator.DroppedBadIntrinsics}" +
+                        $" rgb={_orchestrator.DroppedNoRgb}" +
+                        $" depth={_orchestrator.DroppedNoDepth})" : "");
             }
         }
     }

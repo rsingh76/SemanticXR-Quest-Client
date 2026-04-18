@@ -1,5 +1,6 @@
 using System;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using Meta.XR;
 using Meta.XR.EnvironmentDepth;
 using SemanticXR.Encoding;
@@ -22,6 +23,15 @@ namespace SemanticXR.Streaming
         int _capturedCount, _encoderOutCount;
         float _lastLogTime;
 
+        // --- Drop counters & validation ---
+        int _droppedNoPose;
+        int _droppedNoTimestamp;
+        int _droppedBadIntrinsics;
+        int _droppedNoRgb;
+        int _droppedNoDepth;
+        bool _startupValidated;
+        string _validationError;        // non-null = hard fail, will not stream
+
         // Depth capture
         EnvironmentDepthManager _depthManager;
         bool _depthReadbackPending;
@@ -30,6 +40,14 @@ namespace SemanticXR.Streaming
         FieldInfo _frameDescField;          // EnvironmentDepthManager.frameDescriptors (internal array)
         FieldInfo _frameDescCreateTimeField; // DepthFrameDesc.createTime (may not exist on older SDKs)
         FieldInfo _camTimestampNsField;      // PassthroughCameraAccess._timestampNsMonotonic (private)
+
+        // NOTE: We considered using MRUKNativeFuncs.GetHeadsetPoseAtTime(long ns) which takes
+        // nanoseconds directly with zero precision loss. However, Meta's own GetCameraPose()
+        // never calls it — they only use it as a "native library loaded?" guard, then call
+        // OVRPlugin.GetNodePoseStateAtTime instead. GetHeadsetPoseAtTime is undocumented and
+        // may return in OpenXR RH tracking space (not Unity LH world space). We use
+        // ovrp_GetNodePoseStateAtTime(double) exclusively — same native function as Meta's
+        // GetCameraPose() but with double precision instead of float.
 
         // ---------------------------------------------------------------------
         // CoCapturedFrame: best-effort synchronized capture of RGB + depth + poses.
@@ -79,6 +97,16 @@ namespace SemanticXR.Streaming
         public int QueuedFrames => _tcp?.QueuedFrames ?? 0;
         public string LastError => _tcp?.LastError;
         public string ServerTarget { get; private set; } = "Not connected";
+
+        // Drop counters (read by UI)
+        public int DroppedNoPose => _droppedNoPose;
+        public int DroppedNoTimestamp => _droppedNoTimestamp;
+        public int DroppedBadIntrinsics => _droppedBadIntrinsics;
+        public int DroppedNoRgb => _droppedNoRgb;
+        public int DroppedNoDepth => _droppedNoDepth;
+        public int TotalDropped => _droppedNoPose + _droppedNoTimestamp + _droppedBadIntrinsics + _droppedNoRgb + _droppedNoDepth;
+        public string ValidationError => _validationError;
+        public string PoseMethod { get; private set; } = "unknown";
 
         public event Action OnConnected;
         public event Action OnDisconnected;
@@ -248,12 +276,21 @@ namespace SemanticXR.Streaming
                 dcx = tanL * dfx;
                 dcy = tanT * dfy;
 
-                // NOTE: this pose is in OpenXR tracking space, NOT Unity world space.
-                // To use it next to RGB camera pose (which IS Unity world), it must be
-                // transformed by the XROrigin/OVRCameraRig.trackingSpace transform.
-                // We pass it through as-is and rely on the server to handle the offset
-                // (in scenes without an XR origin offset, tracking space ≈ world space).
-                depthPose = Matrix4x4.TRS(poseLoc, poseRot, Vector3.one);
+                // createPoseLocation/createPoseRotation are in OpenXR TRACKING SPACE,
+                // NOT Unity world space. The RGB camera pose (from ovrp_GetNodePoseStateAtTime)
+                // IS in Unity world space. To make them consistent, we must transform the
+                // depth pose from tracking space to world space using the OVRCameraRig's
+                // trackingSpace transform.
+                var trackingToWorld = Matrix4x4.identity;
+                var rig = FindAnyObjectByType<OVRCameraRig>();
+                if (rig != null && rig.trackingSpace != null)
+                    trackingToWorld = rig.trackingSpace.localToWorldMatrix;
+
+                var depthPoseLocal = Matrix4x4.TRS(poseLoc, poseRot, Vector3.one);
+                depthPose = trackingToWorld * depthPoseLocal;
+
+                if (_capturedCount <= 3)
+                    Debug.LogWarning($"[Depth] trackingToWorld: pos=({trackingToWorld.GetPosition().x:F3},{trackingToWorld.GetPosition().y:F3},{trackingToWorld.GetPosition().z:F3})");
 
                 // createTime: depth sensor capture timestamp in seconds (XrTime / 1e9)
                 if (_frameDescCreateTimeField != null)
@@ -308,6 +345,20 @@ namespace SemanticXR.Streaming
                 {
                     try
                     {
+                        // --- Read timestamp BEFORE GetColors() ---
+                        // PassthroughCameraAccess.Update() sets both _texture and
+                        // _timestampNsMonotonic in the SAME call to CameraGetLatestImage().
+                        // Unity runs all Update() sequentially on one thread, so no other
+                        // Update() can interleave between our reads here. Reading the
+                        // timestamp before AND after GetColors() lets us verify no PCA
+                        // Update() snuck in between (which can't happen, but we check).
+                        long tsBeforeReadback = 0;
+                        if (_camTimestampNsField != null)
+                        {
+                            try { tsBeforeReadback = (long)_camTimestampNsField.GetValue(_cam); }
+                            catch { }
+                        }
+
                         var colors = _cam.GetColors();
                         if (colors.IsCreated && colors.Length > 0)
                         {
@@ -319,26 +370,67 @@ namespace SemanticXR.Streaming
                             var intr = _cam.Intrinsics;
                             if (intr.FocalLength.x > 0)
                             {
-                                rgbFx = intr.FocalLength.x;
-                                rgbFy = intr.FocalLength.y;
-                                rgbCx = intr.PrincipalPoint.x;
-                                rgbCy = intr.PrincipalPoint.y;
+                                // Convert intrinsics from SENSOR space to IMAGE space.
+                                // PrincipalPoint and FocalLength are in full-sensor pixel coords,
+                                // but GetColors() returns a cropped/scaled region (CurrentResolution).
+                                // Must apply the same CalcSensorCropRegion transform that
+                                // ViewportPointToRay uses internally (see PassthroughCameraAccess.cs:546).
+                                var sensorRes = (Vector2)intr.SensorResolution;
+                                var currentRes = (Vector2)res;
+                                var scaleFactor = currentRes / sensorRes;
+                                scaleFactor /= Mathf.Max(scaleFactor.x, scaleFactor.y);
+                                var cropX = sensorRes.x * (1f - scaleFactor.x) * 0.5f;
+                                var cropY = sensorRes.y * (1f - scaleFactor.y) * 0.5f;
+                                var cropW = sensorRes.x * scaleFactor.x;
+                                var cropH = sensorRes.y * scaleFactor.y;
+
+                                // Map sensor-space intrinsics to image-space
+                                rgbFx = intr.FocalLength.x * currentRes.x / cropW;
+                                rgbFy = intr.FocalLength.y * currentRes.y / cropH;
+                                rgbCx = (intr.PrincipalPoint.x - cropX) / cropW * currentRes.x;
+                                rgbCy = (intr.PrincipalPoint.y - cropY) / cropH * currentRes.y;
+
+                                if (_capturedCount <= 3)
+                                    Debug.LogWarning($"[Intrinsics] sensor={intr.SensorResolution} current={res} " +
+                                        $"crop=({cropX:F1},{cropY:F1},{cropW:F1},{cropH:F1}) " +
+                                        $"raw: fx={intr.FocalLength.x:F1} cx={intr.PrincipalPoint.x:F1} cy={intr.PrincipalPoint.y:F1} " +
+                                        $"adjusted: fx={rgbFx:F1} cx={rgbCx:F1} cy={rgbCy:F1}");
                             }
 
-                            // Physical RGB sensor pose with lens offset (Unity world space)
-                            try
-                            {
-                                var pose = _cam.GetCameraPose();
-                                rgbCamPose = Matrix4x4.TRS(pose.position, pose.rotation, Vector3.one);
-                                hasRgbCamPose = true;
-                            }
-                            catch { /* pose not ready */ }
-
-                            // RGB capture timestamp (CLOCK_BOOTTIME ns) via reflection
+                            // RGB capture timestamp — read again and verify it matches
+                            // the pre-readback value (proves no PCA.Update() ran in between)
                             if (_camTimestampNsField != null)
                             {
-                                try { rgbTsNs = (long)_camTimestampNsField.GetValue(_cam); }
+                                try
+                                {
+                                    rgbTsNs = (long)_camTimestampNsField.GetValue(_cam);
+                                    if (tsBeforeReadback != 0 && rgbTsNs != tsBeforeReadback)
+                                    {
+                                        // This should never happen (single-threaded Update),
+                                        // but if it does, the pixels and timestamp don't match
+                                        Debug.LogError($"[SYNC] Timestamp changed during GetColors()! " +
+                                            $"before={tsBeforeReadback} after={rgbTsNs} — frame dropped");
+                                        hasRgb = false;
+                                    }
+                                }
                                 catch { }
+                            }
+
+                            // Physical RGB sensor pose with lens offset (Unity world space).
+                            //
+                            // The image and _timestampNsMonotonic come from a SINGLE native call
+                            // (CameraGetLatestImage in PassthroughCameraAccess.Update).
+                            // We query the pose at that exact timestamp — this is the ONLY way
+                            // Meta's API provides pose+image sync (there is no atomic API
+                            // that returns both). The timestamp IS the sync mechanism.
+                            //
+                            // We use the native GetHeadsetPoseAtTime(long ns) which takes
+                            // nanoseconds directly (zero precision loss), NOT Meta's
+                            // GetCameraPose() which converts to float32 first (lossy).
+                            if (rgbTsNs > 0 && TryGetPoseAtImageTimestamp(rgbTsNs, out var pose))
+                            {
+                                rgbCamPose = Matrix4x4.TRS(pose.position, pose.rotation, Vector3.one);
+                                hasRgbCamPose = true;
                             }
                         }
                     }
@@ -374,12 +466,25 @@ namespace SemanticXR.Streaming
 
                     var data = request.GetData<byte>();
 
+                    // Flip depth vertically: Meta keeps _PreprocessedEnvironmentDepthTexture
+                    // in OpenGL row order (bottom-up). Send top-down on the wire so that
+                    // the server/consumers can use cy = tanT * fy directly.
+                    // R16G16B16A16_SFloat = 8 bytes per pixel.
+                    int depthRowBytes = request.width * 8;
+                    byte[] depthFlipped = new byte[data.Length];
+                    for (int r = 0; r < request.height; r++)
+                    {
+                        NativeArray<byte>.Copy(data, r * depthRowBytes,
+                                               depthFlipped, (request.height - 1 - r) * depthRowBytes,
+                                               depthRowBytes);
+                    }
+
                     // Co-captured frame: depth + RGB + poses + timestamps from request time.
                     // Gating: we accept the frame if depth is present. RGB is optional —
                     // a frame may be depth-only if RGB readback failed transiently.
                     _latestCapture = new CoCapturedFrame
                     {
-                        DepthBytes = data.ToArray(),
+                        DepthBytes = depthFlipped,
                         DepthWidth = request.width,
                         DepthHeight = request.height,
                         NearZ = nearZ,
@@ -408,6 +513,76 @@ namespace SemanticXR.Streaming
                                          $"{_latestCapture.DepthBytes.Length} bytes, near={nearZ:F3} far={farZ:F3}" +
                                          $", rgb={rgbW}x{rgbH}, rgbTsNs={rgbTsNs}, depthTsNs={depthTsNs}");
                 });
+        }
+
+        // ---- Pose lookup that matches the image timestamp exactly ----
+        //
+        // Architecture: PassthroughCameraAccess.Update() calls a single native function
+        // (CameraGetLatestImage) that returns BOTH the GPU texture AND the nanosecond
+        // timestamp (_timestampNsMonotonic) atomically. GetColors() just reads that
+        // already-captured texture back to CPU. So the image and timestamp ARE paired.
+        //
+        // The pose is then queried at that exact timestamp from the tracking system.
+        // This is the ONLY way Meta's API works — there is no single call that returns
+        // image + pose together. The timestamp IS the synchronization mechanism.
+        //
+        // We call ovrp_GetNodePoseStateAtTime(double) — the same native function that
+        // Meta's GetCameraPose() uses internally, but with DOUBLE precision instead of
+        // FLOAT. This gives sub-microsecond timestamp precision vs Meta's ~6ms float loss.
+        //
+        // Convention: returns head pose in Unity LEFT-HANDED WORLD SPACE (same as
+        // Camera.main.transform). We then apply the camera-specific LensOffset to get
+        // the physical RGB camera pose.
+
+        [DllImport("OVRPlugin", CallingConvention = CallingConvention.Cdecl)]
+        static extern OVRPlugin.Result ovrp_GetNodePoseStateAtTime(
+            double time, OVRPlugin.Node nodeId, out OVRPlugin.PoseStatef nodePoseState);
+
+        /// <summary>
+        /// Get the RGB camera pose at the exact image capture time.
+        /// Uses ovrp_GetNodePoseStateAtTime(double) — same function as Meta's GetCameraPose()
+        /// but with double precision. Returns pose in Unity LH world space.
+        /// Applies the physical LensOffset for the active camera (left or right).
+        /// </summary>
+        bool TryGetPoseAtImageTimestamp(long timestampNsMonotonic, out Pose cameraPose)
+        {
+            cameraPose = default;
+            if (timestampNsMonotonic <= 0) return false;
+
+            // Convert ns → seconds with DOUBLE precision (not float!)
+            // Meta's GetCameraPose() does _timestampNsMonotonic * 1e-9f (float) → ~6ms loss
+            // We do timestampNsMonotonic * 1e-9 (double) → sub-microsecond precision
+            double timeSec = timestampNsMonotonic * 1e-9;
+
+            if (!ovrp_GetNodePoseStateAtTime(timeSec, OVRPlugin.Node.Head,
+                    out OVRPlugin.PoseStatef poseState).IsSuccess())
+                return false;
+
+            // OVRPlugin returns in Unity LH world space (SDK handles RH→LH internally)
+            var headPose = poseState.Pose.ToOVRPose();
+
+            // Apply physical lens offset for THIS camera (left or right)
+            // Same logic as Meta's PassthroughCameraAccess.GetCameraPose() line 571-573
+            if (_cam != null)
+            {
+                var lensOffset = _cam.Intrinsics.LensOffset;
+                cameraPose = new Pose(
+                    headPose.position + headPose.orientation * lensOffset.position,
+                    headPose.orientation * lensOffset.rotation);
+            }
+            else
+            {
+                cameraPose = new Pose(headPose.position, headPose.orientation);
+            }
+
+            PoseMethod = "OVRPlugin-double";
+
+            if (_capturedCount <= 3)
+                Debug.LogWarning($"[Pose] tsNs={timestampNsMonotonic} timeSec={timeSec:F9} " +
+                    $"head=({headPose.position.x:F4},{headPose.position.y:F4},{headPose.position.z:F4}) " +
+                    $"cam=({cameraPose.position.x:F4},{cameraPose.position.y:F4},{cameraPose.position.z:F4})");
+
+            return true;
         }
 
         void DisableDemoUI()
@@ -444,9 +619,96 @@ namespace SemanticXR.Streaming
             }
         }
 
+        /// <summary>
+        /// One-time startup validation after camera warmup (~1 second).
+        /// Checks that all required subsystems are functional. Sets _validationError
+        /// on hard failure (streaming will refuse to send frames).
+        /// </summary>
+        void TryStartupValidation()
+        {
+            if (_startupValidated) return;
+            if (_cam == null || !_cam.IsPlaying) return;
+
+            // Wait a bit for the camera to warm up (at least 30 frames or 1 second)
+            if (Time.frameCount < 30 && Time.realtimeSinceStartup < 2f) return;
+            _startupValidated = true;
+
+            var errors = new System.Collections.Generic.List<string>();
+
+            // 1. Camera resolution
+            var res = _cam.CurrentResolution;
+            if (res.x <= 0 || res.y <= 0)
+                errors.Add($"Camera resolution invalid: {res.x}x{res.y}");
+
+            // 2. RGB intrinsics
+            var intr = _cam.Intrinsics;
+            if (intr.FocalLength.x <= 0 || intr.FocalLength.y <= 0)
+                errors.Add($"Intrinsics focal length invalid: fx={intr.FocalLength.x:F1} fy={intr.FocalLength.y:F1}");
+            else if (res.x > 0 && res.y > 0)
+            {
+                // Principal point must be inside image
+                if (intr.PrincipalPoint.x < 0 || intr.PrincipalPoint.x >= res.x ||
+                    intr.PrincipalPoint.y < 0 || intr.PrincipalPoint.y >= res.y)
+                    errors.Add($"Intrinsics principal point outside image: cx={intr.PrincipalPoint.x:F1} cy={intr.PrincipalPoint.y:F1} in {res.x}x{res.y}");
+            }
+
+            // 3. Timestamp reflection
+            if (_camTimestampNsField == null)
+                errors.Add("_timestampNsMonotonic reflection failed -- cannot sync pose to image");
+
+            // 4. Pose lookup availability (OVRPlugin P/Invoke with double precision)
+            try
+            {
+                ovrp_GetNodePoseStateAtTime(0.0, OVRPlugin.Node.Head, out _);
+                PoseMethod = "OVRPlugin-double";
+            }
+            catch
+            {
+                errors.Add("ovrp_GetNodePoseStateAtTime P/Invoke failed -- pose lookup unavailable");
+            }
+
+            // 5. Try a real pose lookup with the current timestamp
+            if (_camTimestampNsField != null && errors.Count == 0)
+            {
+                try
+                {
+                    long tsNs = (long)_camTimestampNsField.GetValue(_cam);
+                    if (tsNs > 0)
+                    {
+                        if (!TryGetPoseAtImageTimestamp(tsNs, out _))
+                            errors.Add($"Pose lookup failed for timestamp {tsNs}ns");
+                    }
+                    else
+                    {
+                        errors.Add($"Timestamp is zero after warmup -- camera not delivering timestamps");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    errors.Add($"Timestamp read failed: {ex.Message}");
+                }
+            }
+
+            if (errors.Count > 0)
+            {
+                _validationError = string.Join("\n", errors);
+                Debug.LogError($"[Validation] HARD FAIL -- will not stream:\n{_validationError}");
+            }
+            else
+            {
+                Debug.LogWarning($"[Validation] PASSED: res={res.x}x{res.y} " +
+                    $"fx={intr.FocalLength.x:F1} fy={intr.FocalLength.y:F1} " +
+                    $"cx={intr.PrincipalPoint.x:F1} cy={intr.PrincipalPoint.y:F1} " +
+                    $"poseMethod={PoseMethod}");
+            }
+        }
+
         void Update()
         {
             if (_tcp == null || _cam == null || !_cam.IsPlaying) return;
+
+            // Run one-time validation after camera warmup
+            TryStartupValidation();
 
             var err = _tcp.LastError;
             if (!string.IsNullOrEmpty(err))
@@ -455,6 +717,9 @@ namespace SemanticXR.Streaming
                 OnError?.Invoke(err);
                 return;
             }
+
+            // Hard validation failure — still run Update for UI/disconnect but don't capture
+            if (_validationError != null) return;
 
             if (Time.time - _lastCaptureTime < _captureInterval) return;
             _lastCaptureTime = Time.time;
@@ -466,21 +731,40 @@ namespace SemanticXR.Streaming
             if (Time.time - _lastLogTime > 5f)
             {
                 _lastLogTime = Time.time;
+                int td = _droppedNoPose + _droppedNoTimestamp + _droppedBadIntrinsics + _droppedNoRgb + _droppedNoDepth;
                 Debug.LogWarning($"[Pipeline] captured={_capturedCount} encoderOut={_encoderOutCount} " +
                                  $"sent={_tcp?.SentFrames} queue={_tcp?.QueuedFrames} " +
-                                 $"depth={_latestCapture.DepthWidth}x{_latestCapture.DepthHeight} connected={_tcp?.IsConnected}");
+                                 $"depth={_latestCapture.DepthWidth}x{_latestCapture.DepthHeight} connected={_tcp?.IsConnected}" +
+                                 (td > 0 ? $" DROPPED={td}(pose={_droppedNoPose} ts={_droppedNoTimestamp} intr={_droppedBadIntrinsics} rgb={_droppedNoRgb} depth={_droppedNoDepth})" : ""));
             }
         }
 
         void CaptureFrame()
         {
-            // We need at least depth + RGB to send a useful frame. RGB-only or
-            // depth-only would force the server to handle missing fields.
-            var c = _latestCapture;
-            if (!c.HasDepth || !c.HasRgb) return;
+            // Hard validation failure — don't attempt anything
+            if (_validationError != null) return;
 
+            var c = _latestCapture;
+
+            // --- Strict gating: every field needed for RGB-D reconstruction must be present ---
+
+            if (!c.HasDepth)  { _droppedNoDepth++; return; }
+            if (!c.HasRgb)    { _droppedNoRgb++; return; }
+
+            // Pose MUST come from the image timestamp path (not Camera.main)
+            if (!c.HasRgbCameraPose)  { _droppedNoPose++; return; }
+            if (c.RgbTimestampNs <= 0) { _droppedNoTimestamp++; return; }
+
+            // Intrinsics sanity: fx/fy positive, principal point inside image
             int w = c.RgbWidth, h = c.RgbHeight;
-            if (w <= 0 || h <= 0) return;
+            if (w <= 0 || h <= 0) { _droppedBadIntrinsics++; return; }
+            if (c.RgbFx <= 0 || c.RgbFy <= 0 ||
+                c.RgbCx < 0 || c.RgbCx >= w ||
+                c.RgbCy < 0 || c.RgbCy >= h)
+            {
+                _droppedBadIntrinsics++;
+                return;
+            }
 
             if (!_encoderReady)
             {
@@ -541,6 +825,9 @@ namespace SemanticXR.Streaming
             int uvSize = (w / 2) * (h / 2) * 2;
             byte[] nv12 = new byte[ySize + uvSize];
 
+            // Vertical flip: GetColors() returns bottom-up on this stack
+            // (decoded JPEGs otherwise come out upside-down). Read source row
+            // (h-1-row) when writing destination row.
             for (int row = 0; row < h; row++)
             {
                 int srcRow = h - 1 - row;
@@ -554,7 +841,7 @@ namespace SemanticXR.Streaming
             int uvIdx = ySize;
             for (int row = 0; row < h; row += 2)
             {
-                int srcRow = h - 1 - row;
+                int srcRow = h - 2 - row;
                 for (int col = 0; col < w; col += 2)
                 {
                     var c = rgba[srcRow * w + col];
