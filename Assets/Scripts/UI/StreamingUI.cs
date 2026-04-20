@@ -19,7 +19,7 @@ namespace SemanticXR.UI
         RectTransform _canvasRect;
         GameObject _connectPanel, _streamingPanel;
 
-        static readonly string[] IpPresets = { "192.168.1.5", "10.195.21.84", "10.193.43.94", "192.168.1.100" };
+        static readonly string[] IpPresets = { "192.168.1.2", "192.168.1.5", "10.195.21.84", "10.193.43.94", "192.168.1.100" };
         int _ipIndex;
         string _ipAddress;
         TextMeshProUGUI _ipLabel;
