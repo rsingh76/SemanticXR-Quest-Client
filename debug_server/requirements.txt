@@ -1,0 +1,9 @@
+av
+grpcio
+matplotlib
+numpy
+open3d
+pillow
+plotly
+protobuf
+scipy
