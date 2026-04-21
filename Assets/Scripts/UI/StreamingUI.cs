@@ -28,6 +28,9 @@ namespace SemanticXR.UI
         string _portString = "50051";
         TextMeshProUGUI _portLabel;
 
+        string _audioPortString = "50054";
+        TextMeshProUGUI _audioPortLabel;
+
         static readonly int[] FpsOptions = { 2, 3, 5, 6, 7, 10, 15, 20, 25, 30 };
         int _fpsIndex;
         int _selectedFps = 2;
@@ -37,7 +40,6 @@ namespace SemanticXR.UI
         TextMeshProUGUI _errorText, _statusText, _statsText;
 
         AudioStreamController _audio;
-        const int AudioServerPort = 50054;   // VisualizerServer (separate from frames TCP 50051)
         Button _micBtn;
         Image _micBtnBg;
         GameObject _micIconGroup, _stopIconGroup;
@@ -134,9 +136,14 @@ namespace SemanticXR.UI
             Mk.Btn(_connectPanel.transform, ">", new Vector2(150, 85), new Vector2(36, 30), new Color(0.3f, 0.3f, 0.4f), 20, () => ChangeIp(1));
             Mk.Btn(_connectPanel.transform, "Custom", new Vector2(230, 85), new Vector2(80, 30), new Color(0.3f, 0.3f, 0.4f), 14, () => OpenKB("ip"));
 
-            Mk.Label(_connectPanel.transform, "Port", new Vector2(0, 50), 16, new Color(0.6f, 0.6f, 0.65f));
-            _portLabel = Mk.Label(_connectPanel.transform, _portString, new Vector2(0, 22), 20, Color.white);
-            Mk.Btn(_connectPanel.transform, "", new Vector2(0, 22), new Vector2(200, 30), new Color(0.2f, 0.2f, 0.25f, 0.5f), 0, () => OpenKB("port"));
+            // Two ports side-by-side: frames (raw TCP or gRPC) and audio (gRPC VisualizerServer).
+            Mk.Label(_connectPanel.transform, "Frames Port", new Vector2(-115, 50), 16, new Color(0.6f, 0.6f, 0.65f));
+            _portLabel = Mk.Label(_connectPanel.transform, _portString, new Vector2(-115, 22), 20, Color.white);
+            Mk.Btn(_connectPanel.transform, "", new Vector2(-115, 22), new Vector2(200, 30), new Color(0.2f, 0.2f, 0.25f, 0.5f), 0, () => OpenKB("port"));
+
+            Mk.Label(_connectPanel.transform, "Audio Port", new Vector2(115, 50), 16, new Color(0.6f, 0.6f, 0.65f));
+            _audioPortLabel = Mk.Label(_connectPanel.transform, _audioPortString, new Vector2(115, 22), 20, Color.white);
+            Mk.Btn(_connectPanel.transform, "", new Vector2(115, 22), new Vector2(200, 30), new Color(0.2f, 0.2f, 0.25f, 0.5f), 0, () => OpenKB("audioPort"));
 
             Mk.Label(_connectPanel.transform, "FPS", new Vector2(-80, -15), 16, new Color(0.6f, 0.6f, 0.65f), TextAlignmentOptions.MidlineRight, 160);
             Mk.Btn(_connectPanel.transform, "<", new Vector2(30, -15), new Vector2(36, 30), new Color(0.3f, 0.3f, 0.4f), 20, () => ChangeFps(-1));
@@ -225,9 +232,15 @@ namespace SemanticXR.UI
         void OpenKB(string field)
         {
             _editField = field;
+            string seed = field switch
+            {
+                "ip"        => _ipAddress,
+                "port"      => _portString,
+                "audioPort" => _audioPortString,
+                _           => ""
+            };
             _keyboard = TouchScreenKeyboard.Open(
-                field == "ip" ? _ipAddress : _portString,
-                TouchScreenKeyboardType.DecimalPad, false, false, false, false, "", 21);
+                seed, TouchScreenKeyboardType.DecimalPad, false, false, false, false, "", 21);
         }
         void OnConnect()
         {
@@ -262,8 +275,10 @@ namespace SemanticXR.UI
             _streamingPanel.SetActive(true);
             _canvasRect.sizeDelta = new Vector2(650, 420);
             // Tell the audio client which server to send to — same IP as the
-            // frames stream, different port (vis_proto VisualizerServer).
-            if (_audio != null) _audio.Configure(_ipAddress, AudioServerPort);
+            // frames stream, separate user-configurable port for the
+            // vis_proto VisualizerServer.
+            if (_audio != null && int.TryParse(_audioPortString, out int audioPort))
+                _audio.Configure(_ipAddress, audioPort);
             Position();
         }
         void ShowError(string msg) { _errorText.text = msg; _connectBtn.interactable = true; }
@@ -333,8 +348,12 @@ namespace SemanticXR.UI
                 if (_keyboard.status == TouchScreenKeyboard.Status.Visible ||
                     _keyboard.status == TouchScreenKeyboard.Status.Done)
                 {
-                    if (_editField == "ip") { _ipAddress = _keyboard.text; _ipLabel.text = _ipAddress; }
-                    else { _portString = _keyboard.text; _portLabel.text = _portString; }
+                    switch (_editField)
+                    {
+                        case "ip":        _ipAddress       = _keyboard.text; _ipLabel.text        = _ipAddress;       break;
+                        case "audioPort": _audioPortString = _keyboard.text; _audioPortLabel.text = _audioPortString; break;
+                        default:          _portString      = _keyboard.text; _portLabel.text      = _portString;      break;
+                    }
                 }
                 if (_keyboard.status != TouchScreenKeyboard.Status.Visible)
                     _keyboard = null;
