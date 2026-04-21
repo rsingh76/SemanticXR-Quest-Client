@@ -6,7 +6,7 @@ Protocol: "QUEST_STREAM\n" header, then repeated [4-byte big-endian length][prot
 
 Per-frame data received (UpstreamSyncMessage_quest):
   - H.265 encoded RGB frame (1280x960, left camera)
-  - Depth map (320x320, R16G16B16A16_SFloat, left eye)
+  - Depth map (320x320, R16_SFloat, left eye — R channel stripped on client)
   - Head pose (4x4 matrix, OpenXR right-handed convention)
   - Camera intrinsics (fx, fy, cx, cy)
   - Meta's depth ZBufferParams (invDepthFactor, depthOffset) for metric conversion
@@ -24,7 +24,7 @@ Depth conversion (see DEPTH_CONVERSION.md for full derivation):
   Metric conversion: depth_meters = sensor_near_z / R_channel_value
   where sensor_near_z = -invDepthFactor / 2 (extracted from Meta's ZBufferParams).
 """
-import sys
+import argparse
 import time
 import struct
 import socket
@@ -41,35 +41,31 @@ import xr_service_pb2
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("debug_server")
 
-OUTPUT_DIR = Path("debug_output")
+# Sessions live next to this script, not relative to cwd.
+OUTPUT_DIR = Path(__file__).resolve().parent / "debug_output"
 
 MAX_SESSION_NUMBER = 100
 
 
-def next_session_number(output_dir: Path):
-    """Return the next session number: max existing session_N (0 <= N < 100) + 1,
-    or 0 if no sessions exist. Returns None if session_100 exists (out of slots)."""
-    if (output_dir / f"session_{MAX_SESSION_NUMBER}").exists():
-        return None
-    highest = -1
-    for entry in output_dir.iterdir() if output_dir.exists() else []:
-        if not entry.is_dir() or not entry.name.startswith("session_"):
+def create_next_session_dir(output_dir: Path):
+    """Create and return the next session dir, never overwriting an existing one.
+    Tries session_0..session_99 in order; returns None if all are taken.
+    Epoch-named sessions from the old server are ignored for numbering purposes."""
+    for n in range(MAX_SESSION_NUMBER):
+        candidate = output_dir / f"session_{n}"
+        try:
+            candidate.mkdir(parents=True, exist_ok=False)
+            return candidate
+        except FileExistsError:
             continue
-        suffix = entry.name[len("session_"):]
-        if not suffix.isdigit():
-            continue
-        n = int(suffix)
-        if n >= MAX_SESSION_NUMBER:
-            continue
-        if n > highest:
-            highest = n
-    return highest + 1
+    return None
 
-# Depth texture format: R16G16B16A16_SFloat = 4 half-float channels, 8 bytes per pixel.
-# R channel = inverted NDC depth (from Meta's DepthPreprocessing.shader)
-# G channel = same for right eye (unused here)
-# B, A channels = edge softness data for soft occlusion (unused here)
-DEPTH_BYTES_PER_PIXEL = 8
+# Depth wire format: R16_SFloat = 1 half-float channel, 2 bytes per pixel.
+# The client reads Meta's R16G16B16A16_SFloat _PreprocessedEnvironmentDepthTexture
+# but strips to just the R channel before sending (G/B/A are unused — right-eye
+# and soft-occlusion data we don't consume). See StreamingOrchestrator.cs depth
+# readback callback. 4x bandwidth reduction vs shipping all 4 channels.
+DEPTH_BYTES_PER_PIXEL = 2
 
 
 class H265Decoder:
@@ -100,7 +96,8 @@ def decode_depth(depth_data, width, height, inv_depth_factor, depth_offset):
     Decode raw depth bytes to metric depth in meters.
 
     Args:
-        depth_data: Raw bytes from _PreprocessedEnvironmentDepthTexture (R16G16B16A16_SFloat)
+        depth_data: Raw bytes, R16_SFloat (R channel stripped from Meta's
+                    R16G16B16A16_SFloat texture on the client). 2 bytes/pixel.
         width, height: Depth image dimensions
         inv_depth_factor: Meta's ZBufferParams.x = -2 * sensor_near_z (infinite far)
                           or -2 * far * near / (far - near) (finite far)
@@ -126,10 +123,9 @@ def decode_depth(depth_data, width, height, inv_depth_factor, depth_offset):
     if len(depth_data) != expected_size:
         return None, False
 
-    # Parse as 4-channel half-float. The client already flips depth to top-down
-    # before sending (see StreamingOrchestrator.cs), so no flip needed here.
-    raw = np.frombuffer(depth_data, dtype=np.float16).reshape(height, width, 4)
-    r_channel = raw[:, :, 0].astype(np.float32)
+    # Parse as single-channel half-float. The client already flipped to top-down
+    # and stripped to R only before sending, so this is a direct reshape.
+    r_channel = np.frombuffer(depth_data, dtype=np.float16).reshape(height, width).astype(np.float32)
 
     if inv_depth_factor == 0:
         return r_channel, True  # No conversion params, return raw
@@ -145,9 +141,14 @@ def decode_depth(depth_data, width, height, inv_depth_factor, depth_offset):
     return depth_metric, True
 
 
-def handle_client(conn, addr, session_dir):
-    """Handle a single Quest client connection."""
-    log.info(f"Client connected: {addr}")
+def handle_client(conn, addr, session_dir, raw_only=True):
+    """Handle a single Quest client connection.
+
+    If raw_only=True (default), skips H.265 decode + JPG save and depth decode
+    + NPY/PNG save. Only writes raw .h265, raw .raw, and meta.txt. Use
+    decode_session.py to produce JPG/NPY/PNG outputs offline.
+    """
+    log.info(f"Client connected: {addr} (raw_only={raw_only})")
 
     # Read newline-terminated header
     header = b""
@@ -167,15 +168,23 @@ def handle_client(conn, addr, session_dir):
 
     frame_count = 0
     start = time.time()
-    decoder = H265Decoder()
+    decoder = None if raw_only else H265Decoder()
     jpg_dir = session_dir / "decoded_jpg"
     depth_dir = session_dir / "depth_png"
-    jpg_dir.mkdir(exist_ok=True)
-    depth_dir.mkdir(exist_ok=True)
+    if not raw_only:
+        jpg_dir.mkdir(exist_ok=True)
+        depth_dir.mkdir(exist_ok=True)
+
+    # Per-stage timing accumulators. Averaged and logged every STATS_WINDOW frames
+    # so the impact on the hot path is a few float adds per stage.
+    STATS_WINDOW = 30
+    t_acc = {"recv": 0.0, "parse": 0.0, "rawio": 0.0, "rgb": 0.0, "depth": 0.0, "meta": 0.0}
+    n_since_stats = 0
 
     try:
         while True:
             # Read 4-byte big-endian message length
+            t_recv_start = time.perf_counter()
             len_bytes = recv_exact(conn, 4)
             if len_bytes is None:
                 break
@@ -188,10 +197,13 @@ def handle_client(conn, addr, session_dir):
             data = recv_exact(conn, msg_len)
             if data is None:
                 break
+            t_recv_ms = (time.perf_counter() - t_recv_start) * 1000.0
 
             # Parse protobuf
+            t0 = time.perf_counter()
             msg = xr_service_pb2.UpstreamSyncMessage_quest()
             msg.ParseFromString(data)
+            t_parse_ms = (time.perf_counter() - t0) * 1000.0
             frame_count += 1
 
             img_msg = msg.image
@@ -210,22 +222,27 @@ def handle_client(conn, addr, session_dir):
             # Derive the actual sensor near plane for logging
             sensor_near_z = -inv_depth_factor / 2.0 if inv_depth_factor != 0 else 0
 
-            # --- Save raw H.265 ---
+            # --- Save raw H.265 + raw depth ---
+            t0 = time.perf_counter()
             if h265_data:
                 (session_dir / f"frame_{frame_num:06d}.h265").write_bytes(h265_data)
-
-            # --- Save raw depth ---
             if depth_data:
                 (session_dir / f"depth_{frame_num:06d}.raw").write_bytes(depth_data)
+            t_rawio_ms = (time.perf_counter() - t0) * 1000.0
 
-            # --- Decode RGB ---
-            decoded_img = decoder.decode_frame(h265_data)
-            if decoded_img:
-                decoded_img.save(str(jpg_dir / f"frame_{frame_num:06d}.jpg"), quality=90)
+            # --- Decode RGB (skipped in raw-only mode) ---
+            t0 = time.perf_counter()
+            decoded_img = None
+            if not raw_only:
+                decoded_img = decoder.decode_frame(h265_data)
+                if decoded_img:
+                    decoded_img.save(str(jpg_dir / f"frame_{frame_num:06d}.jpg"), quality=90)
+            t_rgb_ms = (time.perf_counter() - t0) * 1000.0
 
-            # --- Decode depth to metric meters ---
+            # --- Decode depth to metric meters (skipped in raw-only mode) ---
+            t0 = time.perf_counter()
             depth_decoded = False
-            if depth_data and dw > 0 and dh > 0:
+            if not raw_only and depth_data and dw > 0 and dh > 0:
                 depth_metric, depth_decoded = decode_depth(
                     depth_data, dw, dh, inv_depth_factor, depth_offset
                 )
@@ -254,8 +271,10 @@ def handle_client(conn, addr, session_dir):
                         f"  Depth size mismatch: got {len(depth_data)} B, "
                         f"expected {dw * dh * DEPTH_BYTES_PER_PIXEL} for {dw}x{dh}"
                     )
+            t_depth_ms = (time.perf_counter() - t0) * 1000.0
 
             # --- Save metadata ---
+            t0 = time.perf_counter()
             pose = list(msg.pose)
             with open(session_dir / f"meta_{frame_num:06d}.txt", "w") as f:
                 f.write(f"frame_number: {frame_num}\n")
@@ -263,7 +282,7 @@ def handle_client(conn, addr, session_dir):
                 f.write(f"timestamp_ns: {msg.timestamp_ns}\n")
                 f.write(f"image_size: {msg.image_width}x{msg.image_height}\n")
                 f.write(f"depth_size: {dw}x{dh}\n")
-                f.write(f"depth_format: R16G16B16A16_SFloat\n")
+                f.write(f"depth_format: R16_SFloat\n")
                 f.write(f"depth_inv_depth_factor: {inv_depth_factor:.6f}\n")
                 f.write(f"depth_offset: {depth_offset:.6f}\n")
                 f.write(f"sensor_near_z: {sensor_near_z:.6f}\n")
@@ -321,11 +340,44 @@ def handle_client(conn, addr, session_dir):
                     vals = pose[row * 4:(row + 1) * 4] if len(pose) >= 16 else [0] * 4
                     f.write(f"  [{vals[0]:10.6f} {vals[1]:10.6f} {vals[2]:10.6f} {vals[3]:10.6f}]\n")
 
+            t_meta_ms = (time.perf_counter() - t0) * 1000.0
+
+            # Work done after recv finished (i.e. how long the server blocks TCP
+            # drain for this frame). If proc_ms > 1000/target_fps, TCP backpressure
+            # will throttle the client — this is the server's FPS cap.
+            proc_ms = t_parse_ms + t_rawio_ms + t_rgb_ms + t_depth_ms + t_meta_ms
+
+            # Accumulate per-stage timings
+            t_acc["recv"] += t_recv_ms
+            t_acc["parse"] += t_parse_ms
+            t_acc["rawio"] += t_rawio_ms
+            t_acc["rgb"] += t_rgb_ms
+            t_acc["depth"] += t_depth_ms
+            t_acc["meta"] += t_meta_ms
+            n_since_stats += 1
+
+            # Periodic summary with per-stage averages and derived FPS cap
+            if n_since_stats >= STATS_WINDOW:
+                n = n_since_stats
+                proc_avg = (t_acc["parse"] + t_acc["rawio"] + t_acc["rgb"]
+                            + t_acc["depth"] + t_acc["meta"]) / n
+                fps_cap = 1000.0 / proc_avg if proc_avg > 0 else 0
+                log.info(
+                    f"[Timing avg/{n}] recv={t_acc['recv']/n:5.1f}  "
+                    f"parse={t_acc['parse']/n:5.1f}  rawIO={t_acc['rawio']/n:5.1f}  "
+                    f"rgb={t_acc['rgb']/n:5.1f}  depth={t_acc['depth']/n:5.1f}  "
+                    f"meta={t_acc['meta']/n:5.1f}  "
+                    f"| proc={proc_avg:5.1f}ms fps_cap={fps_cap:4.1f}"
+                )
+                for k in t_acc:
+                    t_acc[k] = 0.0
+                n_since_stats = 0
+
             # --- Per-frame log line ---
             elapsed = time.time() - start
             fps_actual = frame_count / elapsed if elapsed > 0 else 0
-            rgb_str = "RGB" if decoded_img else "---"
-            depth_str = "D" if depth_decoded else "-"
+            rgb_str = "raw" if raw_only else ("RGB" if decoded_img else "---")
+            depth_str = "d"  if raw_only else ("D" if depth_decoded else "-")
 
             log.info(
                 f"#{frame_num:4d} | "
@@ -334,6 +386,7 @@ def handle_client(conn, addr, session_dir):
                 f"RGB:{msg.image_width}x{msg.image_height} | "
                 f"fx={intr.fx:.1f} | "
                 f"{rgb_str}+{depth_str} | "
+                f"proc={proc_ms:4.0f}ms | "
                 f"{fps_actual:.1f}fps"
             )
 
@@ -357,7 +410,7 @@ def recv_exact(sock, n):
     return bytes(data)
 
 
-def serve(port=50051):
+def serve(port=50051, raw_only=True):
     """Start the TCP server and listen for Quest connections."""
     OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -378,23 +431,23 @@ def serve(port=50051):
     log.info(f"  Listening on 0.0.0.0:{port}")
     log.info(f"  Local IP: {local_ip}")
     log.info(f"  Output: {OUTPUT_DIR.absolute()}")
+    log.info(f"  Mode: {'raw-only (fast)' if raw_only else 'decode (JPG/NPY/PNG)'}")
     log.info("========================================")
 
     try:
         while True:
             try:
                 conn, addr = server.accept()
-                session_num = next_session_number(OUTPUT_DIR)
-                if session_num is None:
+                session_dir = create_next_session_dir(OUTPUT_DIR)
+                if session_dir is None:
                     log.error("========================================")
-                    log.error("  session_100 exists — OUT OF SESSION SLOTS!")
+                    log.error("  All session_0..session_99 slots taken — OUT OF SLOTS!")
                     log.error("  Clear some space in %s before accepting new sessions.", OUTPUT_DIR.absolute())
                     log.error("========================================")
                     conn.close()
                     continue
-                session_dir = OUTPUT_DIR / f"session_{session_num}"
-                session_dir.mkdir(parents=True, exist_ok=True)
-                t = threading.Thread(target=handle_client, args=(conn, addr, session_dir), daemon=True)
+                log.info(f"New session: {session_dir}")
+                t = threading.Thread(target=handle_client, args=(conn, addr, session_dir, raw_only), daemon=True)
                 t.start()
             except socket.timeout:
                 continue
@@ -404,5 +457,12 @@ def serve(port=50051):
 
 
 if __name__ == "__main__":
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 50051
-    serve(port)
+    ap = argparse.ArgumentParser(description="SemanticXR debug TCP server")
+    ap.add_argument("port", nargs="?", type=int, default=50051,
+                    help="TCP port to listen on (default 50051)")
+    ap.add_argument("--decode", action="store_true",
+                    help="Decode H.265 to JPG and depth to NPY/PNG on the fly. "
+                         "Default is raw-only (much faster). Use decode_session.py "
+                         "to produce decoded outputs from a raw session later.")
+    args = ap.parse_args()
+    serve(args.port, raw_only=not args.decode)

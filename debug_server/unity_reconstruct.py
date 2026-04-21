@@ -61,7 +61,7 @@ def build_tsdf(session_dir, voxel=0.01, max_depth=5.0):
 
     volume = o3d.pipelines.integration.ScalableTSDFVolume(
         voxel_length=voxel,
-        sdf_trunc=voxel * 5.0,
+        sdf_trunc=voxel * 3.0,
         color_type=o3d.pipelines.integration.TSDFVolumeColorType.NoColor,
     )
 
