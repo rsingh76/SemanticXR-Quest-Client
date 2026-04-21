@@ -51,8 +51,12 @@ namespace SemanticXR.UI
             _orchestrator.OnDisconnected += ShowConnect;
             _orchestrator.OnError += ShowError;
 
-            // On-device projection sanity test (auto-disables after 10 frames)
-            gameObject.AddComponent<SemanticXR.Diagnostics.ProjectionSanityTest>();
+            // ProjectionSanityTest is intentionally NOT auto-spawned. It's a
+            // one-off diagnostic that runs 10 validation frames and writes a
+            // bunch of LogWarnings; useful when bringing up depth↔RGB sync but
+            // pure noise in production. Add it manually in the editor (or
+            // uncomment the line below) when debugging projection math.
+            // gameObject.AddComponent<SemanticXR.Diagnostics.ProjectionSanityTest>();
 
             BuildUI();
         }

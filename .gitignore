@@ -21,6 +21,10 @@ buildInfo.txt
 Packages/packages-lock.json
 .vscode/
 
+# Unity auto-generated scene-recovery folder — local only, do not track
+Assets/_Recovery/
+Assets/_Recovery.meta
+
 # Debug server (Python)
 debug_server/_*.py
 debug_server/debug_output/
