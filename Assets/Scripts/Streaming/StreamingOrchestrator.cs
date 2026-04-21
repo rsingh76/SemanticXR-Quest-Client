@@ -10,11 +10,17 @@ using UnityEngine.Rendering;
 
 namespace SemanticXR.Streaming
 {
+    public enum FramesTransport { Tcp, Grpc }
+
     public class StreamingOrchestrator : MonoBehaviour
     {
+        [Header("Transport")]
+        [SerializeField] FramesTransport transport = FramesTransport.Grpc;
+        public FramesTransport Transport { get => transport; set => transport = value; }
+
         PassthroughCameraAccess _cam;
         HardwareH265Encoder _encoder;
-        TcpProtoClient _tcp;
+        IFramesClient _tcp;     // name kept for minimal churn; actually holds any IFramesClient
 
         int _frameNumber;
         float _captureInterval;
@@ -137,7 +143,10 @@ namespace SemanticXR.Streaming
             _encoderOutCount = 0;
             ServerTarget = $"{address}:{port}";
 
-            _tcp = new TcpProtoClient(address, port, fps);
+            _tcp = transport == FramesTransport.Grpc
+                ? (IFramesClient)new GrpcFramesClient(address, port, fps)
+                : new TcpProtoClient(address, port, fps);
+            Debug.LogWarning($"[Orchestrator] Frames transport = {transport}");
             _tcp.Start();
 
             OnConnected?.Invoke();

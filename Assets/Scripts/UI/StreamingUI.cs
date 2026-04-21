@@ -25,7 +25,9 @@ namespace SemanticXR.UI
         string _ipAddress;
         TextMeshProUGUI _ipLabel;
 
-        string _portString = "50051";
+        const string DefaultTcpPort  = "50051";
+        const string DefaultGrpcPort = "50055";
+        string _portString = DefaultGrpcPort;   // initial value updated in Awake based on orchestrator's transport
         TextMeshProUGUI _portLabel;
 
         string _audioPortString = "50054";
@@ -35,6 +37,9 @@ namespace SemanticXR.UI
         int _fpsIndex;
         int _selectedFps = 2;
         TextMeshProUGUI _fpsLabel;
+
+        Button _transportBtn;
+        TextMeshProUGUI _transportLabel;
 
         Button _connectBtn;
         TextMeshProUGUI _errorText, _statusText, _statsText;
@@ -67,6 +72,10 @@ namespace SemanticXR.UI
             _audio.OnStatus            += OnAudioStatus;
             _audio.OnListeningChanged  += OnDictationListeningChanged;
             _audio.OnError             += OnDictationErrorReceived;
+
+            // Initial frames port follows whichever transport the orchestrator
+            // defaults to. Kept in sync on toggle via ToggleTransport().
+            _portString = DefaultPortFor(_orchestrator.Transport);
 
             // ProjectionSanityTest is intentionally NOT auto-spawned. It's a
             // one-off diagnostic that runs 10 validation frames and writes a
@@ -145,10 +154,16 @@ namespace SemanticXR.UI
             _audioPortLabel = Mk.Label(_connectPanel.transform, _audioPortString, new Vector2(115, 22), 20, Color.white);
             Mk.Btn(_connectPanel.transform, "", new Vector2(115, 22), new Vector2(200, 30), new Color(0.2f, 0.2f, 0.25f, 0.5f), 0, () => OpenKB("audioPort"));
 
-            Mk.Label(_connectPanel.transform, "FPS", new Vector2(-80, -15), 16, new Color(0.6f, 0.6f, 0.65f), TextAlignmentOptions.MidlineRight, 160);
-            Mk.Btn(_connectPanel.transform, "<", new Vector2(30, -15), new Vector2(36, 30), new Color(0.3f, 0.3f, 0.4f), 20, () => ChangeFps(-1));
-            _fpsLabel = Mk.Label(_connectPanel.transform, _selectedFps.ToString(), new Vector2(80, -15), 20, Color.white);
-            Mk.Btn(_connectPanel.transform, ">", new Vector2(130, -15), new Vector2(36, 30), new Color(0.3f, 0.3f, 0.4f), 20, () => ChangeFps(1));
+            Mk.Label(_connectPanel.transform, "FPS", new Vector2(-220, -15), 16, new Color(0.6f, 0.6f, 0.65f), TextAlignmentOptions.MidlineRight, 160);
+            Mk.Btn(_connectPanel.transform, "<", new Vector2(-110, -15), new Vector2(36, 30), new Color(0.3f, 0.3f, 0.4f), 20, () => ChangeFps(-1));
+            _fpsLabel = Mk.Label(_connectPanel.transform, _selectedFps.ToString(), new Vector2(-60, -15), 20, Color.white);
+            Mk.Btn(_connectPanel.transform, ">", new Vector2(-10, -15), new Vector2(36, 30), new Color(0.3f, 0.3f, 0.4f), 20, () => ChangeFps(1));
+
+            Mk.Label(_connectPanel.transform, "Transport", new Vector2(60, -15), 14, new Color(0.6f, 0.6f, 0.65f), TextAlignmentOptions.MidlineLeft, 100);
+            _transportBtn = Mk.Btn(_connectPanel.transform, _orchestrator.Transport.ToString(),
+                new Vector2(220, -15), new Vector2(100, 30),
+                new Color(0.3f, 0.3f, 0.4f), 16, ToggleTransport);
+            _transportLabel = _transportBtn.GetComponentInChildren<TextMeshProUGUI>();
 
             _connectBtn = Mk.Btn(_connectPanel.transform, "Connect", new Vector2(0, -65), new Vector2(220, 50), new Color(0.15f, 0.55f, 0.25f), 24, OnConnect);
             _errorText = Mk.Label(_connectPanel.transform, "", new Vector2(0, -110), 15, new Color(1f, 0.4f, 0.4f));
@@ -229,6 +244,19 @@ namespace SemanticXR.UI
             _selectedFps = FpsOptions[_fpsIndex];
             _fpsLabel.text = _selectedFps.ToString();
         }
+        void ToggleTransport()
+        {
+            _orchestrator.Transport = _orchestrator.Transport == FramesTransport.Tcp
+                ? FramesTransport.Grpc : FramesTransport.Tcp;
+            if (_transportLabel != null) _transportLabel.text = _orchestrator.Transport.ToString();
+            // Auto-snap the frames port to the new transport's default.
+            _portString = DefaultPortFor(_orchestrator.Transport);
+            if (_portLabel != null) _portLabel.text = _portString;
+            Debug.Log($"[StreamingUI] Transport → {_orchestrator.Transport}, port → {_portString}");
+        }
+
+        static string DefaultPortFor(FramesTransport t) =>
+            t == FramesTransport.Grpc ? DefaultGrpcPort : DefaultTcpPort;
         void OpenKB(string field)
         {
             _editField = field;
@@ -372,7 +400,8 @@ namespace SemanticXR.UI
                 _statsText.color = totalDropped > 0
                     ? new Color(1f, 0.7f, 0.3f)
                     : new Color(0.55f, 0.55f, 0.6f);
-                _statsText.text = $"Sent {_orchestrator.FrameCount} · Q {_orchestrator.QueuedFrames} · Drops {totalDropped} · {_orchestrator.CaptureFps:F0} FPS";
+                string fpsStr = _orchestrator.CaptureFps > 0 ? $"{_orchestrator.CaptureFps:F1}" : "—";
+                _statsText.text = $"Sent {_orchestrator.FrameCount} · Q {_orchestrator.QueuedFrames} · Drops {totalDropped} · {fpsStr} FPS";
             }
         }
     }

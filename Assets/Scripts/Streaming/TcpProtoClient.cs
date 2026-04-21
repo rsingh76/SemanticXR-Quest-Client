@@ -14,7 +14,7 @@ namespace SemanticXR.Streaming
     /// Bypasses gRPC HTTP/2 which doesn't work with Grpc.Net.Client on Android IL2CPP.
     /// Protocol: [4 bytes big-endian length][protobuf bytes] per message.
     /// </summary>
-    public class TcpProtoClient : IDisposable
+    public class TcpProtoClient : IFramesClient
     {
         readonly string _address;
         readonly int _port;
