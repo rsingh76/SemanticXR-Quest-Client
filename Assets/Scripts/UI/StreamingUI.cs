@@ -33,7 +33,7 @@ namespace SemanticXR.UI
         TextMeshProUGUI _fpsLabel;
 
         Button _connectBtn;
-        TextMeshProUGUI _errorText, _statusText, _statsText, _diagText, _validationText;
+        TextMeshProUGUI _errorText, _statusText, _statsText, _diagText, _validationText, _timingText;
 
         TouchScreenKeyboard _keyboard;
         string _editField;
@@ -139,11 +139,16 @@ namespace SemanticXR.UI
             _validationText.GetComponent<RectTransform>().sizeDelta = new Vector2(560, 40);
 
             // Diagnostics: drop counters
-            _diagText = Mk.Label(_streamingPanel.transform, "", new Vector2(0, 10), 13, new Color(0.6f, 0.6f, 0.65f), TextAlignmentOptions.TopLeft, 560);
+            _diagText = Mk.Label(_streamingPanel.transform, "", new Vector2(0, 35), 13, new Color(0.6f, 0.6f, 0.65f), TextAlignmentOptions.TopLeft, 560);
             _diagText.enableWordWrapping = true;
-            _diagText.GetComponent<RectTransform>().sizeDelta = new Vector2(560, 100);
+            _diagText.GetComponent<RectTransform>().sizeDelta = new Vector2(560, 30);
 
-            Mk.Btn(_streamingPanel.transform, "Disconnect", new Vector2(0, -120), new Vector2(200, 45), new Color(0.6f, 0.15f, 0.15f), 22, () => _orchestrator.Disconnect());
+            // Timing: per-stage latency (ms), rolling average
+            _timingText = Mk.Label(_streamingPanel.transform, "timing: warmup...", new Vector2(0, -5), 13, new Color(0.55f, 0.75f, 0.95f), TextAlignmentOptions.TopLeft, 560);
+            _timingText.enableWordWrapping = true;
+            _timingText.GetComponent<RectTransform>().sizeDelta = new Vector2(560, 50);
+
+            Mk.Btn(_streamingPanel.transform, "Disconnect", new Vector2(0, -140), new Vector2(200, 45), new Color(0.6f, 0.15f, 0.15f), 22, () => _orchestrator.Disconnect());
             _streamingPanel.SetActive(false);
         }
 
@@ -241,6 +246,9 @@ namespace SemanticXR.UI
                         $" intr={_orchestrator.DroppedBadIntrinsics}" +
                         $" rgb={_orchestrator.DroppedNoRgb}" +
                         $" depth={_orchestrator.DroppedNoDepth})" : "");
+
+                // Timing line (rolling avg over 30 frames from Orchestrator)
+                _timingText.text = _orchestrator.TimingLine;
             }
         }
     }

@@ -201,9 +201,56 @@ A companion debug server (`debug_server/`) can reconstruct 3D point clouds or TS
 
 ### Known Limitations
 
-- `_PreprocessedEnvironmentDepthTexture` contains soft occlusion statistics (not raw depth), though the R channel conversion `nearZ / R` yields equivalent linear depth.
+- **Depth texture is Meta's preprocessed output, not the raw time-of-flight sensor.** `_PreprocessedEnvironmentDepthTexture` is an R16G16B16A16 half-float texture produced by Meta's depth preprocessing shader. The R channel carries full depth (stored as inverted NDC: `1.0 - ndc_depth`), and `metric_meters = sensor_near_z / R` recovers metric depth exactly. Meta does not expose the raw sensor output to apps — this preprocessed texture is what's available. The other channels (G = right eye; B, A = edge-softness data used by Meta's soft-occlusion shader) are unused by this pipeline, so we strip them on the client and ship R-only.
 - Depth resolution is low (320x320).
 - RGB and depth come from separate Meta APIs with no unified synchronized capture — synchronization is best-effort by co-capturing in the same frame.
+
+### RGB ↔ Metadata Pairing (`fix/streaming-fps`)
+
+Each outgoing TCP message bundles **encoded RGB bytes + pose + depth + intrinsics + timestamps**. For downstream reconstruction to be correct, all of those fields must come from the *same capture moment*. Several bugs in the hardware H.265 path were silently breaking that invariant. Documenting them here so the invariants are clear and the fixes aren't later regressed.
+
+#### Before this branch
+
+Ordered by severity to downstream reconstruction. **Missing frames are recoverable; misaligned frames silently corrupt the whole reconstruction.** Items 1 and 2 produced misalignment — invisible in logs but catastrophic. Items 3-5 produced missing or un-decodable frames — visible in logs, merely annoying.
+
+1. **No `presentationTimeUs` bookkeeping → RGB pixels shipped with the wrong frame's pose.** (Catastrophic.) MediaCodec has internal pipelining latency: an output buffer that emerges from `dequeueOutputBuffer` does NOT necessarily correspond to the input we just queued. The old code attached the encoded bytes to the *currently processing* `FrameData` (the one whose input we just queued) and enqueued it. With 1 frame of encoder latency, every outgoing message was shipping input N's pixels alongside input N+1's pose, depth, and timestamps — the server received internally inconsistent bundles and had no way to detect it. Projecting those pixels back onto the mesh would land them at the wrong world position proportional to head motion over one frame period (~43 ms).
+
+2. **Only one output drained per input.** (Catastrophic — same misalignment category.) The old loop had an unconditional `break` after the first successful `dequeueOutputBuffer`. If MediaCodec had two buffers ready at once (common when an I-frame's codec-config and IDR come out together), we took one and left the other in the encoder's internal queue — to be drained later with the *wrong* input's metadata attached, same failure mode as #1.
+
+3. **Per-byte JNI readout → frame drops.** (Visible frame loss.) Reading the encoded payload back from Java was `for (i=0..size) encoded[i] = outBuf.Call<sbyte>("get")`. At ~80 KB/frame and ~5 µs per JNI roundtrip, that single loop cost ~400 ms/frame, capping the encoder at ~2.5 FPS regardless of the network. Frames piled up in the encoder input queue, whose `MaxQueue=5` drop-oldest policy silently discarded ~76% of captured frames. No corruption — just missing frames.
+
+4. **I-frames not self-contained → decode failures after any packet loss.** (Visible frame loss.) Without `prepend-sps-pps-to-idr-frames`, VPS/SPS/PPS parameter sets only appeared in the initial codec-config output. If those were dropped (network glitch, client reconnect, TCP queue overflow), the server's decoder had no way to pick up the stream — every subsequent IDR was undecodable in isolation until the next full re-init. Visible as runs of `---+D` in the server log.
+
+5. **Codec-config buffers shipped as if they were frames.** (Minor — bandwidth waste + frame-count confusion.) Quick glossary: an H.265 stream needs three *parameter sets* at its head for any decoder to make sense of it — **VPS** (Video Parameter Set, overall stream profile), **SPS** (Sequence Parameter Set, resolution / bit depth / profile level), and **PPS** (Picture Parameter Set, per-picture encoding parameters). These are metadata, not picture data; a decoder needs to see them once before decoding any picture. Android MediaCodec emits them as a separate output buffer with `BUFFER_FLAG_CODEC_CONFIG` set — a "codec config" buffer. The old `Encode()` loop didn't distinguish them — any non-empty output was wrapped in the current `FrameData` and shipped. Result: roughly half of the `.h265` files on the server contained only parameter-set bytes with no picture data. PyAV correctly produced no frame for them, so the JPG count looked artificially low (~46% of captured frames).
+
+#### Failure cases this produced
+
+Same severity ordering — corruption first, then frame loss.
+
+| Symptom | Root cause | Severity |
+|---|---|---|
+| Colors land slightly off on recolored meshes, worse with head motion | RGB pixels paired with the wrong frame's pose (encoder latency + no pts matching) | **Silent corruption** |
+| `---+D` stripes in server log (RGB decode fails for runs of frames) | Dropped P-frames break the reference chain; IDRs not self-contained so can't re-sync | Visible frame loss |
+| Server receives only 2-3 FPS when client "eff FPS" shows 23 | Encoder backed up → input queue drops | Visible frame loss |
+| Encoder FPS stuck at ~2.5 regardless of settings | Per-byte JNI readout | Visible frame loss |
+| `decoded_jpg/` has ~46% of the frame count | Codec-config buffers shipped as frames; no picture data inside | Cosmetic |
+
+#### What this branch enforces
+
+Every outgoing TCP message is now **internally consistent** — all fields come from the same capture moment. Concretely, in [`HardwareH265Encoder.cs`](Assets/Scripts/Encoding/HardwareH265Encoder.cs):
+
+1. **Bulk JNI readout** via `AndroidJNI.NewByteArray` + `CallObjectMethod("get", byte[])` + `FromSByteArray`. One JNI roundtrip per frame instead of ~80,000. Per-frame encode cost drops from ~400 ms to ~a few ms.
+
+2. **Drain-all** output loop with no premature `break` — every ready output is processed. Skip buffers flagged `BUFFER_FLAG_CODEC_CONFIG` (they're handled below, not shipped as pictures).
+
+3. **`prepend-sps-pps-to-idr-frames`** in the MediaFormat config so every IDR starts with VPS/SPS/PPS inline. Every I-frame is now self-contained — the decoder can recover from any point in the stream after receiving one I-frame, and the legacy separate-codec-config buffer is no longer needed.
+
+4. **`_inFlight` map keyed by `presentationTimeUs`.** Every `queueInputBuffer` call records `_inFlight[pts] = frame`. Every `dequeueOutputBuffer` reads the `outPts` stamped by MediaCodec, looks up the *original* `FrameData`, and attaches the encoded bytes to it before enqueueing to the output queue. This guarantees the encoded RGB bytes always travel with the pose/depth/intrinsics/timestamps of the capture that produced them, regardless of encoder pipelining depth. If a lookup ever fails (shouldn't happen in a healthy pipeline), the frame is dropped with a warning rather than shipped with mismatched metadata — fail loud, never silent. The map is capped at 64 entries as a safety net.
+
+Supporting changes in the same branch:
+- **Depth R-channel strip** in [`StreamingOrchestrator.cs`](Assets/Scripts/Streaming/StreamingOrchestrator.cs) — Meta's R16G16B16A16 depth texture has 4× more bandwidth than needed; we now ship only R16_SFloat, cutting depth payload from ~800 KB to ~200 KB per frame.
+- **Server raw-only mode** in [`debug_server/unity_server.py`](debug_server/unity_server.py) — default now skips inline H.265 decode + JPG/NPY/PNG save, collapsing per-frame server work from ~65 ms to ~5 ms. Offline decode via `debug_server/decode_session.py`.
+- **Per-stage timing** on both client and server, surfaced in the UI and periodic log lines, so pipeline bottlenecks are visible in numbers.
 
 ## gRPC Server
 

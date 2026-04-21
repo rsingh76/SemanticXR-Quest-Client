@@ -108,6 +108,17 @@ namespace SemanticXR.Streaming
         public string ValidationError => _validationError;
         public string PoseMethod { get; private set; } = "unknown";
 
+        // --- Client-side timing stats (rolling average over StatsWindow frames) ---
+        const int StatsWindow = 30;
+        int _statsFrames;
+        double _tRgb, _tNv12, _tEnc, _tTcp;   // summed ms over the window
+        double _tDepthCb;                     // summed ms (async callback latency)
+        int _depthCbN;                        // samples collected (async, may differ from _statsFrames)
+        double _loopIntervalSum;              // summed ms between consecutive captures
+        double _lastLoopTime = -1.0;
+
+        public string TimingLine { get; private set; } = "warmup...";
+
         public event Action OnConnected;
         public event Action OnDisconnected;
         public event Action<string> OnError;
@@ -338,6 +349,8 @@ namespace SemanticXR.Streaming
             long rgbTsNs = 0;
             bool hasRgb = false;
 
+            // Timing: mark the start of the synchronous RGB phase
+            double rgbStart = Time.realtimeSinceStartupAsDouble;
             if (_cam != null && _cam.IsPlaying)
             {
                 var res = _cam.CurrentResolution;
@@ -364,7 +377,9 @@ namespace SemanticXR.Streaming
                         {
                             rgbW = res.x;
                             rgbH = res.y;
+                            double nv12Start = Time.realtimeSinceStartupAsDouble;
                             rgbNv12 = RgbaToNv12(colors, rgbW, rgbH);
+                            _tNv12 += (Time.realtimeSinceStartupAsDouble - nv12Start) * 1000.0;
                             hasRgb = true;
 
                             var intr = _cam.Intrinsics;
@@ -437,8 +452,10 @@ namespace SemanticXR.Streaming
                     catch { /* passthrough not ready yet */ }
                 }
             }
+            _tRgb += (Time.realtimeSinceStartupAsDouble - rgbStart) * 1000.0;
 
             _depthReadbackPending = true;
+            double depthReqStart = Time.realtimeSinceStartupAsDouble;
 
             var zbuf = Shader.GetGlobalVector("_EnvironmentDepthZBufferParams");
             float nearZ = zbuf.x;
@@ -461,22 +478,36 @@ namespace SemanticXR.Streaming
                 request =>
                 {
                     _depthReadbackPending = false;
+                    _tDepthCb += (Time.realtimeSinceStartupAsDouble - depthReqStart) * 1000.0;
+                    _depthCbN++;
 
                     if (request.hasError) return;
 
                     var data = request.GetData<byte>();
 
-                    // Flip depth vertically: Meta keeps _PreprocessedEnvironmentDepthTexture
-                    // in OpenGL row order (bottom-up). Send top-down on the wire so that
-                    // the server/consumers can use cy = tanT * fy directly.
-                    // R16G16B16A16_SFloat = 8 bytes per pixel.
-                    int depthRowBytes = request.width * 8;
-                    byte[] depthFlipped = new byte[data.Length];
-                    for (int r = 0; r < request.height; r++)
+                    // Strip to R channel + flip vertically in one pass.
+                    //
+                    // Source: R16G16B16A16_SFloat (8 bytes/pixel), bottom-up (OpenGL order).
+                    //   R = left-eye inverted NDC depth   <- the only channel we use
+                    //   G = right-eye                     <- unused (we're a left-camera capture)
+                    //   B, A = edge softness for soft occlusion  <- unused
+                    //
+                    // Dropping G/B/A cuts depth bandwidth by 4x (800KB -> 200KB per frame
+                    // at 320x320). We also flip to top-down here so server/consumers can
+                    // use cy = tanT * fy directly.
+                    //
+                    // Output: R16_SFloat, 2 bytes/pixel, top-down.
+                    int w = request.width, h = request.height;
+                    byte[] depthR = new byte[w * h * 2];
+                    for (int r = 0; r < h; r++)
                     {
-                        NativeArray<byte>.Copy(data, r * depthRowBytes,
-                                               depthFlipped, (request.height - 1 - r) * depthRowBytes,
-                                               depthRowBytes);
+                        int srcBase = (h - 1 - r) * w * 8; // bottom-up source row
+                        int dstBase = r * w * 2;           // top-down target row
+                        for (int c = 0; c < w; c++)
+                        {
+                            depthR[dstBase + c * 2]     = data[srcBase + c * 8];
+                            depthR[dstBase + c * 2 + 1] = data[srcBase + c * 8 + 1];
+                        }
                     }
 
                     // Co-captured frame: depth + RGB + poses + timestamps from request time.
@@ -484,7 +515,7 @@ namespace SemanticXR.Streaming
                     // a frame may be depth-only if RGB readback failed transiently.
                     _latestCapture = new CoCapturedFrame
                     {
-                        DepthBytes = depthFlipped,
+                        DepthBytes = depthR,
                         DepthWidth = request.width,
                         DepthHeight = request.height,
                         NearZ = nearZ,
@@ -724,9 +755,30 @@ namespace SemanticXR.Streaming
             if (Time.time - _lastCaptureTime < _captureInterval) return;
             _lastCaptureTime = Time.time;
 
+            // Track wall-clock between consecutive captures (true client FPS).
+            double nowReal = Time.realtimeSinceStartupAsDouble;
+            if (_lastLoopTime > 0) _loopIntervalSum += (nowReal - _lastLoopTime) * 1000.0;
+            _lastLoopTime = nowReal;
+
             TryReadbackDepth();
             CaptureFrame();
             ForwardEncoded();
+
+            _statsFrames++;
+            if (_statsFrames >= StatsWindow)
+            {
+                int n = _statsFrames;
+                double loopAvg = n > 1 ? _loopIntervalSum / (n - 1) : 0;
+                double effFps = loopAvg > 0 ? 1000.0 / loopAvg : 0;
+                double depthAvg = _depthCbN > 0 ? _tDepthCb / _depthCbN : 0;
+                TimingLine = $"rgb={_tRgb/n:F0} nv12={_tNv12/n:F0} depth_cb={depthAvg:F0} " +
+                             $"enc={_tEnc/n:F1} tcp={_tTcp/n:F1} | loop={loopAvg:F0}ms eff={effFps:F1}fps";
+                Debug.LogWarning($"[Timing avg/{n}] {TimingLine}");
+                _tRgb = _tNv12 = _tEnc = _tTcp = 0;
+                _tDepthCb = 0; _depthCbN = 0;
+                _loopIntervalSum = 0;
+                _statsFrames = 0;
+            }
 
             if (Time.time - _lastLogTime > 5f)
             {
@@ -768,7 +820,7 @@ namespace SemanticXR.Streaming
 
             if (!_encoderReady)
             {
-                _encoder = new HardwareH265Encoder(w, h, 8_000_000, 30);
+                _encoder = new HardwareH265Encoder(w, h, 5_000_000, 30);
                 _encoder.Start();
                 _encoderReady = true;
                 Debug.LogWarning($"[Orchestrator] Encoder init: {w}x{h}");
@@ -805,7 +857,9 @@ namespace SemanticXR.Streaming
                 frame.DepthFovTanDown = c.DepthFovTanDown;
             }
 
+            double encStart = Time.realtimeSinceStartupAsDouble;
             _encoder.Enqueue(frame);
+            _tEnc += (Time.realtimeSinceStartupAsDouble - encStart) * 1000.0;
             _capturedCount++;
         }
 
@@ -815,7 +869,9 @@ namespace SemanticXR.Streaming
             while (_encoder.OutputQueue.TryDequeue(out var f))
             {
                 _encoderOutCount++;
+                double tcpStart = Time.realtimeSinceStartupAsDouble;
                 _tcp.Enqueue(f);
+                _tTcp += (Time.realtimeSinceStartupAsDouble - tcpStart) * 1000.0;
             }
         }
 
