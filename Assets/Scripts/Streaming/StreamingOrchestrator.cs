@@ -118,6 +118,9 @@ namespace SemanticXR.Streaming
         double _lastLoopTime = -1.0;
 
         public string TimingLine { get; private set; } = "warmup...";
+        // Latest rolling-average client capture rate (frames/sec). Updated alongside
+        // TimingLine. 0 until the first stats window completes.
+        public float CaptureFps { get; private set; }
 
         public event Action OnConnected;
         public event Action OnDisconnected;
@@ -773,6 +776,7 @@ namespace SemanticXR.Streaming
                 double depthAvg = _depthCbN > 0 ? _tDepthCb / _depthCbN : 0;
                 TimingLine = $"rgb={_tRgb/n:F0} nv12={_tNv12/n:F0} depth_cb={depthAvg:F0} " +
                              $"enc={_tEnc/n:F1} tcp={_tTcp/n:F1} | loop={loopAvg:F0}ms eff={effFps:F1}fps";
+                CaptureFps = (float)effFps;
                 Debug.LogWarning($"[Timing avg/{n}] {TimingLine}");
                 _tRgb = _tNv12 = _tEnc = _tTcp = 0;
                 _tDepthCb = 0; _depthCbN = 0;

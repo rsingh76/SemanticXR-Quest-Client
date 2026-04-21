@@ -39,6 +39,8 @@ namespace SemanticXR.UI
         }
 
         LineRenderer _laserLine;
+        GameObject _reticle;
+        Transform _reticleT;
 
         void LateUpdate()
         {
@@ -57,8 +59,55 @@ namespace SemanticXR.UI
                 _laserLine.endColor = new Color(0.4f, 0.8f, 1f, 0.1f);
             }
 
-            _laserLine.SetPosition(0, anchor.transform.position);
-            _laserLine.SetPosition(1, anchor.transform.position + anchor.transform.forward * 5f);
+            if (_reticle == null)
+            {
+                _reticle = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+                _reticle.name = "RayReticle";
+                var col = _reticle.GetComponent<Collider>();
+                if (col != null) Destroy(col);
+                _reticleT = _reticle.transform;
+                _reticleT.SetParent(transform, false);
+                _reticleT.localScale = Vector3.one * 0.012f;
+                var mr = _reticle.GetComponent<MeshRenderer>();
+                mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                mr.receiveShadows = false;
+                var mat = new Material(Shader.Find("Unlit/Color"));
+                mat.color = new Color(0.55f, 0.85f, 1f, 1f);
+                mr.material = mat;
+                _reticle.SetActive(false);
+            }
+
+            var origin = anchor.transform.position;
+            var end = origin + anchor.transform.forward * 5f;
+            bool hit = false;
+
+            // Prefer the ray interactor's UI hit so the dot lines up with
+            // whatever the XRUIInputModule considers the actual target.
+            foreach (var ray in FindObjectsByType<XRRayInteractor>(FindObjectsSortMode.None))
+            {
+                if (ray.TryGetCurrentUIRaycastResult(out var result) && result.gameObject != null)
+                {
+                    end = result.worldPosition;
+                    hit = true;
+                    break;
+                }
+            }
+
+            _laserLine.SetPosition(0, origin);
+            _laserLine.SetPosition(1, end);
+
+            if (hit)
+            {
+                if (!_reticle.activeSelf) _reticle.SetActive(true);
+                _reticleT.position = end;
+                // Keep the reticle a constant apparent size regardless of distance.
+                float dist = Vector3.Distance(origin, end);
+                _reticleT.localScale = Vector3.one * Mathf.Clamp(0.012f * dist, 0.006f, 0.03f);
+            }
+            else if (_reticle.activeSelf)
+            {
+                _reticle.SetActive(false);
+            }
         }
 
         void Update()

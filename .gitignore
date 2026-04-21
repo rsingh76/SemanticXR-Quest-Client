@@ -31,3 +31,7 @@ debug_server/debug_output/
 debug_server/backup_dir/
 debug_server/**/__pycache__/
 debug_server/**/*.pyc
+debug_server/*.wav
+
+# Secrets — never commit
+ProjectSettings/wit.config

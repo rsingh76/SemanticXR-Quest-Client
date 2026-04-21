@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using UnityEngine.XR;
 using UnityEngine.XR.Interaction.Toolkit.UI;
@@ -27,13 +28,22 @@ namespace SemanticXR.UI
         string _portString = "50051";
         TextMeshProUGUI _portLabel;
 
-        static readonly int[] FpsOptions = { 2, 3, 5, 10, 15, 20, 25, 30 };
+        static readonly int[] FpsOptions = { 2, 3, 5, 6, 7, 10, 15, 20, 25, 30 };
         int _fpsIndex;
         int _selectedFps = 2;
         TextMeshProUGUI _fpsLabel;
 
         Button _connectBtn;
-        TextMeshProUGUI _errorText, _statusText, _statsText, _diagText, _validationText, _timingText;
+        TextMeshProUGUI _errorText, _statusText, _statsText;
+
+        AudioStreamController _audio;
+        const int AudioServerPort = 50054;   // VisualizerServer (separate from frames TCP 50051)
+        Button _micBtn;
+        Image _micBtnBg;
+        GameObject _micIconGroup, _stopIconGroup;
+        TextMeshProUGUI _dictationText, _dictationStatus;
+        static readonly Color MicIdleColor = new Color(0.15f, 0.45f, 0.75f);
+        static readonly Color MicActiveColor = new Color(0.85f, 0.2f, 0.2f);
 
         TouchScreenKeyboard _keyboard;
         string _editField;
@@ -50,6 +60,11 @@ namespace SemanticXR.UI
             _orchestrator.OnConnected += ShowStreaming;
             _orchestrator.OnDisconnected += ShowConnect;
             _orchestrator.OnError += ShowError;
+
+            _audio = gameObject.AddComponent<AudioStreamController>();
+            _audio.OnStatus            += OnAudioStatus;
+            _audio.OnListeningChanged  += OnDictationListeningChanged;
+            _audio.OnError             += OnDictationErrorReceived;
 
             // ProjectionSanityTest is intentionally NOT auto-spawned. It's a
             // one-off diagnostic that runs 10 validation frames and writes a
@@ -135,22 +150,61 @@ namespace SemanticXR.UI
             Mk.Stretch(_streamingPanel, 20);
             Mk.Label(_streamingPanel.transform, "Streaming", new Vector2(0, 155), 26, new Color(0.3f, 0.9f, 0.4f));
             _statusText = Mk.Label(_streamingPanel.transform, "", new Vector2(0, 120), 16, Color.white);
-            _statsText = Mk.Label(_streamingPanel.transform, "", new Vector2(0, 95), 16, new Color(0.7f, 0.7f, 0.75f));
 
-            // Validation status (green = passed, red = failed)
-            _validationText = Mk.Label(_streamingPanel.transform, "Validating...", new Vector2(0, 65), 14, new Color(0.9f, 0.9f, 0.3f), TextAlignmentOptions.TopLeft, 560);
-            _validationText.enableWordWrapping = true;
-            _validationText.GetComponent<RectTransform>().sizeDelta = new Vector2(560, 40);
+            // Compact stats line in the top-right corner. Center is intentionally
+            // left empty for new feature UI (e.g. add-voice-query).
+            // Format: "Sent N · Q M · Drops K · X FPS". Color goes orange on drops.
+            _statsText = Mk.Label(_streamingPanel.transform, "",
+                new Vector2(-10, 175), 13, new Color(0.55f, 0.55f, 0.6f),
+                TextAlignmentOptions.TopRight, 320);
+            _statsText.GetComponent<RectTransform>().sizeDelta = new Vector2(320, 22);
 
-            // Diagnostics: drop counters
-            _diagText = Mk.Label(_streamingPanel.transform, "", new Vector2(0, 35), 13, new Color(0.6f, 0.6f, 0.65f), TextAlignmentOptions.TopLeft, 560);
-            _diagText.enableWordWrapping = true;
-            _diagText.GetComponent<RectTransform>().sizeDelta = new Vector2(560, 30);
+            // Voice dictation: text box above a mic/stop toggle button.
+            Mk.Label(_streamingPanel.transform, "Speak to SemanticXR", new Vector2(0, 85), 14,
+                new Color(0.6f, 0.6f, 0.65f));
 
-            // Timing: per-stage latency (ms), rolling average
-            _timingText = Mk.Label(_streamingPanel.transform, "timing: warmup...", new Vector2(0, -5), 13, new Color(0.55f, 0.75f, 0.95f), TextAlignmentOptions.TopLeft, 560);
-            _timingText.enableWordWrapping = true;
-            _timingText.GetComponent<RectTransform>().sizeDelta = new Vector2(560, 50);
+            var textBoxBg = Mk.Panel(_streamingPanel.transform, "DictationBox",
+                new Color(0.12f, 0.12f, 0.18f, 0.9f));
+            var tbR = textBoxBg.GetComponent<RectTransform>();
+            tbR.anchoredPosition = new Vector2(0, 25);
+            tbR.sizeDelta = new Vector2(520, 100);
+            textBoxBg.GetComponent<Image>().raycastTarget = false;
+
+            _dictationText = Mk.Label(textBoxBg.transform, "",
+                Vector2.zero, 16, new Color(0.92f, 0.92f, 0.95f),
+                TextAlignmentOptions.TopLeft, 500);
+            var dtR = _dictationText.GetComponent<RectTransform>();
+            dtR.sizeDelta = new Vector2(500, 90);
+            _dictationText.textWrappingMode = TextWrappingModes.Normal;
+
+            _micBtn = Mk.Btn(_streamingPanel.transform, "", new Vector2(0, -75),
+                new Vector2(90, 90), MicIdleColor, 0, OnMicClicked);
+            _micBtnBg = _micBtn.GetComponent<Image>();
+            // Procedurally generated circular disc — no dependency on built-in sprites.
+            _micBtnBg.sprite = IconFactory.Circle;
+            _micBtnBg.type   = Image.Type.Simple;
+
+            _micIconGroup  = IconFactory.MakeIconChild(_micBtn.transform, "MicIcon",  IconFactory.Mic);
+            _stopIconGroup = IconFactory.MakeIconChild(_micBtn.transform, "StopIcon", IconFactory.Stop);
+            _stopIconGroup.SetActive(false);
+
+            // Diagnostic: log raw pointer events on the button so we can tell
+            // whether taps are even reaching the GameObject independent of the
+            // Button component's onClick path.
+            var trig = _micBtn.gameObject.AddComponent<EventTrigger>();
+            AddTrigger(trig, EventTriggerType.PointerEnter, () => Debug.Log("[StreamingUI] pointer ENTER mic"));
+            AddTrigger(trig, EventTriggerType.PointerDown,  () => Debug.Log("[StreamingUI] pointer DOWN mic"));
+            AddTrigger(trig, EventTriggerType.PointerUp,    () => Debug.Log("[StreamingUI] pointer UP mic"));
+            AddTrigger(trig, EventTriggerType.PointerClick, () => Debug.Log("[StreamingUI] pointer CLICK mic"));
+
+            _dictationStatus = Mk.Label(_streamingPanel.transform, "Tap the mic to speak",
+                new Vector2(0, -115), 12, new Color(0.55f, 0.55f, 0.6f));
+            // Clamp the status label so a long error message can't expand the
+            // RectTransform and paint over the rest of the panel.
+            var statusR = _dictationStatus.GetComponent<RectTransform>();
+            statusR.sizeDelta = new Vector2(560, 18);
+            _dictationStatus.overflowMode      = TextOverflowModes.Ellipsis;
+            _dictationStatus.textWrappingMode  = TextWrappingModes.NoWrap;
 
             Mk.Btn(_streamingPanel.transform, "Disconnect", new Vector2(0, -140), new Vector2(200, 45), new Color(0.6f, 0.15f, 0.15f), 22, () => _orchestrator.Disconnect());
             _streamingPanel.SetActive(false);
@@ -186,6 +240,7 @@ namespace SemanticXR.UI
         }
         void ShowConnect()
         {
+            ResetDictation();
             _canvasRect.sizeDelta = new Vector2(650, 420);
             _connectBtn.interactable = true;
             _errorText.text = "";
@@ -193,14 +248,81 @@ namespace SemanticXR.UI
             _streamingPanel.SetActive(false);
             Position();
         }
+
+        void ResetDictation()
+        {
+            if (_audio != null) _audio.Cancel();
+            if (_dictationText   != null) _dictationText.text = "";
+            OnDictationListeningChanged(false);
+            if (_dictationStatus != null) _dictationStatus.text = "Tap the mic to speak";
+        }
         void ShowStreaming()
         {
             _connectPanel.SetActive(false);
             _streamingPanel.SetActive(true);
             _canvasRect.sizeDelta = new Vector2(650, 420);
+            // Tell the audio client which server to send to — same IP as the
+            // frames stream, different port (vis_proto VisualizerServer).
+            if (_audio != null) _audio.Configure(_ipAddress, AudioServerPort);
             Position();
         }
         void ShowError(string msg) { _errorText.text = msg; _connectBtn.interactable = true; }
+
+        void OnMicClicked()
+        {
+            Debug.Log($"[StreamingUI] mic clicked, listening={_audio.IsListening}");
+            StartCoroutine(FlashMicButton());
+            if (_dictationStatus != null)
+                _dictationStatus.text = _audio.IsListening ? "Stopping..." : "Tap registered — starting mic...";
+            _audio.Toggle();
+        }
+
+        System.Collections.IEnumerator FlashMicButton()
+        {
+            if (_micBtnBg == null) yield break;
+            var original = _micBtnBg.color;
+            _micBtnBg.color = new Color(1f, 0.95f, 0.2f);  // bright yellow
+            yield return new WaitForSeconds(0.15f);
+            // If a listening-state change already re-colored it, don't stomp.
+            if (_micBtnBg.color.r > 0.9f && _micBtnBg.color.g > 0.9f)
+                _micBtnBg.color = original;
+        }
+
+        static void AddTrigger(EventTrigger trig, EventTriggerType type, System.Action cb)
+        {
+            var entry = new EventTrigger.Entry { eventID = type };
+            entry.callback.AddListener(_ => cb());
+            trig.triggers.Add(entry);
+        }
+
+        void OnAudioStatus(string s)
+        {
+            if (_dictationStatus != null) _dictationStatus.text = s;
+            if (_dictationText   != null) _dictationText.text   = s;  // also echo to the text box for now
+        }
+
+        void OnDictationListeningChanged(bool listening)
+        {
+            if (_micBtnBg != null)
+            {
+                _micBtnBg.color = listening ? MicActiveColor : MicIdleColor;
+                var c = _micBtn.colors;
+                c.highlightedColor = _micBtnBg.color * 1.3f;
+                c.pressedColor = _micBtnBg.color * 0.7f;
+                _micBtn.colors = c;
+            }
+            if (_micIconGroup  != null) _micIconGroup.SetActive(!listening);
+            if (_stopIconGroup != null) _stopIconGroup.SetActive(listening);
+            if (_dictationStatus != null) _dictationStatus.text = listening ? "Listening..." : "Tap the mic to speak";
+        }
+
+        void OnDictationErrorReceived(string msg)
+        {
+            Debug.LogWarning($"[StreamingUI] dictation error: {msg}");
+            if (_dictationStatus != null && !string.IsNullOrEmpty(msg))
+                _dictationStatus.text = $"<color=#ff6b6b>Error: {msg}</color>";
+            // Button state is user-intent driven — do not flip it on error.
+        }
 
         void Update()
         {
@@ -225,34 +347,13 @@ namespace SemanticXR.UI
                 _statusText.text = _orchestrator.IsConnected
                     ? $"Connected to {_orchestrator.ServerTarget}"
                     : $"Connecting to {_orchestrator.ServerTarget}...";
-                _statsText.text = $"Sent: {_orchestrator.FrameCount}  |  Queue: {_orchestrator.QueuedFrames}";
 
-                // Validation status
-                var valErr = _orchestrator.ValidationError;
-                if (valErr != null)
-                {
-                    _validationText.text = $"VALIDATION FAILED:\n{valErr}";
-                    _validationText.color = new Color(1f, 0.3f, 0.3f);
-                }
-                else if (_orchestrator.PoseMethod != "unknown")
-                {
-                    _validationText.text = $"Validated | Pose: {_orchestrator.PoseMethod}";
-                    _validationText.color = new Color(0.3f, 0.9f, 0.4f);
-                }
-
-                // Drop counters
+                // Compact stats line: Sent · Q · Drops · FPS  (color-coded on drops).
                 int totalDropped = _orchestrator.TotalDropped;
-                var dropColor = totalDropped > 0 ? new Color(1f, 0.7f, 0.3f) : new Color(0.5f, 0.5f, 0.55f);
-                _diagText.color = dropColor;
-                _diagText.text = $"Dropped: {totalDropped}" +
-                    (totalDropped > 0 ? $"  (pose={_orchestrator.DroppedNoPose}" +
-                        $" ts={_orchestrator.DroppedNoTimestamp}" +
-                        $" intr={_orchestrator.DroppedBadIntrinsics}" +
-                        $" rgb={_orchestrator.DroppedNoRgb}" +
-                        $" depth={_orchestrator.DroppedNoDepth})" : "");
-
-                // Timing line (rolling avg over 30 frames from Orchestrator)
-                _timingText.text = _orchestrator.TimingLine;
+                _statsText.color = totalDropped > 0
+                    ? new Color(1f, 0.7f, 0.3f)
+                    : new Color(0.55f, 0.55f, 0.6f);
+                _statsText.text = $"Sent {_orchestrator.FrameCount} · Q {_orchestrator.QueuedFrames} · Drops {totalDropped} · {_orchestrator.CaptureFps:F0} FPS";
             }
         }
     }
@@ -281,6 +382,7 @@ namespace SemanticXR.UI
             t.text = text; t.fontSize = size; t.alignment = align; t.color = color; t.raycastTarget = false;
             return t;
         }
+
         public static Button Btn(Transform p, string label, Vector2 pos, Vector2 size, Color bg, float fontSize, UnityEngine.Events.UnityAction click)
         {
             var go = new GameObject("B_" + label); go.transform.SetParent(p, false);
@@ -300,6 +402,110 @@ namespace SemanticXR.UI
             }
             btn.onClick.AddListener(click);
             return btn;
+        }
+    }
+
+    // Procedurally generates mic / stop / circle sprites so we never rely on
+    // Unity's built-in resources (which may not load on every Android build).
+    // Textures are 128x128 RGBA, cached as static singletons.
+    static class IconFactory
+    {
+        static Sprite _mic, _stop, _circle;
+
+        public static Sprite Mic    => _mic    ??= BuildMic();
+        public static Sprite Stop   => _stop   ??= BuildStop();
+        public static Sprite Circle => _circle ??= BuildCircle();
+
+        const int Size = 128;
+
+        public static GameObject MakeIconChild(Transform parent, string name, Sprite sprite)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            var r = go.AddComponent<RectTransform>();
+            r.anchorMin = r.anchorMax = new Vector2(0.5f, 0.5f);
+            r.anchoredPosition = Vector2.zero; r.sizeDelta = new Vector2(50, 50);
+            var img = go.AddComponent<Image>();
+            img.sprite = sprite; img.color = Color.white; img.raycastTarget = false;
+            return go;
+        }
+
+        static Sprite BuildMic()
+        {
+            var px = ClearBuffer();
+            // Capsule head (rounded rect with fully-rounded ends).
+            FillRoundedRect(px, 46, 48, 36, 60, 18, Color.white);
+            // Stem down from head.
+            FillRoundedRect(px, 62, 30, 4, 20, 2, Color.white);
+            // Horizontal base line.
+            FillRoundedRect(px, 46, 22, 36, 5, 2.5f, Color.white);
+            return MakeSprite(px);
+        }
+
+        static Sprite BuildStop()
+        {
+            var px = ClearBuffer();
+            FillRoundedRect(px, 16, 16, 96, 96, 14, Color.white);
+            return MakeSprite(px);
+        }
+
+        static Sprite BuildCircle()
+        {
+            var px = ClearBuffer();
+            // A rounded rect with r = size/2 is a perfect disc.
+            FillRoundedRect(px, 0, 0, Size, Size, Size / 2f, Color.white);
+            return MakeSprite(px);
+        }
+
+        static Color32[] ClearBuffer()
+        {
+            var px = new Color32[Size * Size];
+            // Initialized to (0,0,0,0) by default.
+            return px;
+        }
+
+        // Anti-aliased rounded rectangle drawn into the buffer.
+        // (x0, y0) = bottom-left corner, (w, h) = size, r = corner radius.
+        static void FillRoundedRect(Color32[] px, float x0, float y0, float w, float h, float r, Color color)
+        {
+            int xmin = Mathf.Max(0, Mathf.FloorToInt(x0 - 1));
+            int xmax = Mathf.Min(Size - 1, Mathf.CeilToInt(x0 + w + 1));
+            int ymin = Mathf.Max(0, Mathf.FloorToInt(y0 - 1));
+            int ymax = Mathf.Min(Size - 1, Mathf.CeilToInt(y0 + h + 1));
+
+            for (int y = ymin; y <= ymax; y++)
+            {
+                for (int x = xmin; x <= xmax; x++)
+                {
+                    float pxF = x + 0.5f;
+                    float pyF = y + 0.5f;
+                    float cx = Mathf.Clamp(pxF, x0 + r, x0 + w - r);
+                    float cy = Mathf.Clamp(pyF, y0 + r, y0 + h - r);
+                    float dx = pxF - cx, dy = pyF - cy;
+                    float d  = Mathf.Sqrt(dx * dx + dy * dy) - r;
+                    float a  = Mathf.Clamp01(0.5f - d);
+                    if (a <= 0) continue;
+                    int idx = y * Size + x;
+                    byte newA = (byte)Mathf.RoundToInt(color.a * a * 255f);
+                    if (newA > px[idx].a)
+                        px[idx] = new Color32(
+                            (byte)Mathf.RoundToInt(color.r * 255f),
+                            (byte)Mathf.RoundToInt(color.g * 255f),
+                            (byte)Mathf.RoundToInt(color.b * 255f),
+                            newA);
+                }
+            }
+        }
+
+        static Sprite MakeSprite(Color32[] px)
+        {
+            var tex = new Texture2D(Size, Size, TextureFormat.RGBA32, false);
+            tex.filterMode = FilterMode.Bilinear;
+            tex.wrapMode   = TextureWrapMode.Clamp;
+            tex.hideFlags  = HideFlags.HideAndDontSave;
+            tex.SetPixels32(px);
+            tex.Apply();
+            return Sprite.Create(tex, new Rect(0, 0, Size, Size), new Vector2(0.5f, 0.5f), 100f);
         }
     }
 }
