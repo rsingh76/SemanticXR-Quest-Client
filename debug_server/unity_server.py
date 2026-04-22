@@ -410,7 +410,7 @@ def recv_exact(sock, n):
     return bytes(data)
 
 
-def serve(port=50051, raw_only=True):
+def serve(port=50055, raw_only=True):
     """Start the TCP server and listen for Quest connections."""
     OUTPUT_DIR.mkdir(exist_ok=True)
 
@@ -458,8 +458,8 @@ def serve(port=50051, raw_only=True):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="SemanticXR debug TCP server")
-    ap.add_argument("port", nargs="?", type=int, default=50051,
-                    help="TCP port to listen on (default 50051)")
+    ap.add_argument("port", nargs="?", type=int, default=50055,
+                    help="TCP port to listen on (default 50055)")
     ap.add_argument("--decode", action="store_true",
                     help="Decode H.265 to JPG and depth to NPY/PNG on the fly. "
                          "Default is raw-only (much faster). Use decode_session.py "

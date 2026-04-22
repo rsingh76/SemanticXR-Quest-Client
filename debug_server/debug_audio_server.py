@@ -7,7 +7,7 @@ and written to disk under debug_output/audio/. The response is an empty
 `allPointClouds` — no Whisper, no CLIP, no SLAM. This is just a bytes-arrived
 smoke test.
 
-Run alongside the existing frames server (`unity_server.py` on 50051):
+Run alongside the frames servers (unity_grpc_server.py on 50051 or unity_server.py on 50055):
 
     python debug_audio_server.py          # listens on 50054
 

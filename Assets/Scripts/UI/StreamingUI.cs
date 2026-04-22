@@ -25,8 +25,10 @@ namespace SemanticXR.UI
         string _ipAddress;
         TextMeshProUGUI _ipLabel;
 
-        const string DefaultTcpPort  = "50051";
-        const string DefaultGrpcPort = "50055";
+        // Mirror production: the real server talks gRPC on 50051, so gRPC
+        // debug/prod lives at 50051. TCP debug server moves to 50055.
+        const string DefaultTcpPort  = "50055";
+        const string DefaultGrpcPort = "50051";
         string _portString = DefaultGrpcPort;   // initial value updated in Awake based on orchestrator's transport
         TextMeshProUGUI _portLabel;
 

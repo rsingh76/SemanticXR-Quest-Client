@@ -23,7 +23,8 @@ Capture a session from the Quest client, then on the server machine:
 
 ```bash
 # 1. Run the server (defaults to raw-only mode — fast, no live decoding)
-python unity_server.py             # listens on :50051
+python unity_grpc_server.py        # gRPC (default, mirrors production) — listens on :50051
+python unity_server.py             # raw TCP debug transport — listens on :50055
 python unity_server.py --decode    # decode JPG/NPY/PNG as frames arrive (slower)
 
 # 2. If captured in raw-only mode, decode the raw files to JPG + NPY first
