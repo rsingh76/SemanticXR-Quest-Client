@@ -19,9 +19,10 @@ namespace SemanticXR.UI
     // YAHA's native (Rust/hyper) HttpHandler replaces Mono's HTTP client.
     public class AudioStreamController : MonoBehaviour
     {
-        public event Action<string> OnStatus;
-        public event Action<bool>   OnListeningChanged;
-        public event Action<string> OnError;
+        public event Action<string>               OnStatus;
+        public event Action<bool>                 OnListeningChanged;
+        public event Action<string>               OnError;
+        public event Action<XrVis.allPointClouds> OnPointClouds;    // fired when server returns a query response
 
         const int ServerSampleRate = 12000;   // what visualization_service.py expects
         const int MaxRecordSecs    = 30;
@@ -296,6 +297,7 @@ namespace SemanticXR.UI
                     string statusMsg = $"Sent. Server returned {response.NumPointClouds} point clouds.";
                     Debug.Log($"[Audio] {statusMsg}");
                     OnStatus?.Invoke(statusMsg);
+                    OnPointClouds?.Invoke(response);
                 }
                 finally
                 {

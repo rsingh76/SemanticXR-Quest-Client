@@ -66,9 +66,52 @@ def write_wav(path: Path, pcm_bytes: bytes):
         f.write(pcm_bytes)
 
 
+def _build_axis_gnomon_response():
+    """Synthetic response for coordinate-frame debugging.
+
+    Returns three PointClouds forming an RGB axis gnomon anchored 1 m in front
+    of the SLAM-map origin along server-frame -Z (which is Unity +Z forward
+    after the client-side Z-flip):
+      - 34 red points along +X      (right)
+      - 33 green points along +Y    (up)
+      - 33 blue points along +Z     (server-back; should appear BEHIND user in Unity)
+
+    Points are spaced 1 cm apart so each axis extends ~33 cm.
+    Anchor at (0, 0, -1) puts the gnomon origin 1 m forward in Unity world.
+    """
+    ANCHOR = (0.0, 0.0, -1.0)
+    STEP = 0.01
+
+    def axis_points(count, ax):
+        pts = []
+        for i in range(count):
+            p = list(ANCHOR)
+            p[ax] += STEP * i
+            pts.extend(p)
+        return pts
+
+    response = vis_pb2.allPointClouds()
+    # +X axis, red
+    response.pointClouds.append(vis_pb2.PointCloud(
+        points=axis_points(34, 0), num_points=34, centroid=[0, 0, 0]))
+    response.colors.extend([1.0, 0.0, 0.0])
+    # +Y axis, green
+    response.pointClouds.append(vis_pb2.PointCloud(
+        points=axis_points(33, 1), num_points=33, centroid=[0, 0, 0]))
+    response.colors.extend([0.0, 1.0, 0.0])
+    # +Z axis, blue
+    response.pointClouds.append(vis_pb2.PointCloud(
+        points=axis_points(33, 2), num_points=33, centroid=[0, 0, 0]))
+    response.colors.extend([0.0, 0.0, 1.0])
+    response.numPointClouds = 3
+    response.serverQueryProcessing = 0.0
+    return response
+
+
 class AudioDumpServicer(vis_pb2_grpc.VisualizerServerServicer):
-    def __init__(self, output_dir: Path):
+    def __init__(self, output_dir: Path, fake_points: bool = False):
         self.output_dir = output_dir
+        self.fake_points = fake_points
 
     def clientTextQuery(self, request_iterator, context):
         chunks = []
@@ -93,6 +136,10 @@ class AudioDumpServicer(vis_pb2_grpc.VisualizerServerServicer):
         if text_queries:
             log.info("Text query fields: %r", text_queries)
 
+        if self.fake_points:
+            log.info("Returning synthetic RGB axis gnomon (100 points, 3 colors)")
+            return _build_axis_gnomon_response()
+
         # Empty response — this debug server doesn't run the SLAM pipeline.
         return vis_pb2.allPointClouds(numPointClouds=0)
 
@@ -106,10 +153,10 @@ class AudioDumpServicer(vis_pb2_grpc.VisualizerServerServicer):
         return vis_pb2.Status(message=True)
 
 
-def serve(port: int, output_dir: Path):
+def serve(port: int, output_dir: Path, fake_points: bool):
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=2))
     vis_pb2_grpc.add_VisualizerServerServicer_to_server(
-        AudioDumpServicer(output_dir), server)
+        AudioDumpServicer(output_dir, fake_points=fake_points), server)
     server.add_insecure_port(f"[::]:{port}")
     server.start()
     log.info("Listening on port %d, dumping to %s", port, output_dir.resolve())
@@ -125,5 +172,9 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=50054)
     ap.add_argument("--out", type=Path, default=Path(__file__).parent / "debug_output" / "audio")
+    ap.add_argument("--fake-points", action="store_true",
+                    help="Return an RGB axis gnomon (100 points) in the clientTextQuery "
+                         "response so the Unity point-cloud renderer can be tested without "
+                         "the real visualization server.")
     args = ap.parse_args()
-    serve(args.port, args.out)
+    serve(args.port, args.out, fake_points=args.fake_points)

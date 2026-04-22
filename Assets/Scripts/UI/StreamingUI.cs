@@ -47,7 +47,9 @@ namespace SemanticXR.UI
         TextMeshProUGUI _errorText, _statusText, _statsText;
 
         AudioStreamController _audio;
+        PointCloudVisualizer  _visualizer;
         Button _micBtn;
+        Button _clearBtn;
         Image _micBtnBg;
         GameObject _micIconGroup, _stopIconGroup;
         TextMeshProUGUI _dictationText, _dictationStatus;
@@ -74,6 +76,13 @@ namespace SemanticXR.UI
             _audio.OnStatus            += OnAudioStatus;
             _audio.OnListeningChanged  += OnDictationListeningChanged;
             _audio.OnError             += OnDictationErrorReceived;
+            _audio.OnPointClouds       += OnPointCloudsReceived;
+
+            // Point-cloud visualizer lives on a separate child GameObject so
+            // spheres are parented there, not on the StreamCanvas.
+            var pcHost = new GameObject("PointClouds");
+            pcHost.transform.SetParent(transform, worldPositionStays: false);
+            _visualizer = pcHost.AddComponent<PointCloudVisualizer>();
 
             // Initial frames port follows whichever transport the orchestrator
             // defaults to. Kept in sync on toggle via ToggleTransport().
@@ -230,7 +239,10 @@ namespace SemanticXR.UI
             _dictationStatus.overflowMode      = TextOverflowModes.Ellipsis;
             _dictationStatus.textWrappingMode  = TextWrappingModes.NoWrap;
 
-            Mk.Btn(_streamingPanel.transform, "Disconnect", new Vector2(0, -140), new Vector2(200, 45), new Color(0.6f, 0.15f, 0.15f), 22, () => _orchestrator.Disconnect());
+            _clearBtn = Mk.Btn(_streamingPanel.transform, "Clear Points",
+                new Vector2(-160, -140), new Vector2(140, 40),
+                new Color(0.25f, 0.35f, 0.5f), 18, ClearPoints);
+            Mk.Btn(_streamingPanel.transform, "Disconnect", new Vector2(80, -140), new Vector2(200, 45), new Color(0.6f, 0.15f, 0.15f), 22, () => _orchestrator.Disconnect());
             _streamingPanel.SetActive(false);
         }
 
@@ -295,6 +307,7 @@ namespace SemanticXR.UI
         void ResetDictation()
         {
             if (_audio != null) _audio.Cancel();
+            if (_visualizer != null) _visualizer.Clear();
             if (_dictationText   != null) _dictationText.text = "";
             OnDictationListeningChanged(false);
             if (_dictationStatus != null) _dictationStatus.text = "Tap the mic to speak";
@@ -344,6 +357,22 @@ namespace SemanticXR.UI
         {
             if (_dictationStatus != null) _dictationStatus.text = s;
             if (_dictationText   != null) _dictationText.text   = s;  // also echo to the text box for now
+        }
+
+        void OnPointCloudsReceived(XrVis.allPointClouds response)
+        {
+            if (_visualizer == null || response == null) return;
+            var (objects, points) = _visualizer.AddResponse(response);
+            string msg = $"Found {objects} objects, {points} points ({response.ServerQueryProcessing:F0} ms)";
+            Debug.Log($"[StreamingUI] {msg}");
+            if (_dictationText != null) _dictationText.text = msg;
+        }
+
+        void ClearPoints()
+        {
+            _visualizer?.Clear();
+            if (_dictationText != null) _dictationText.text = "Points cleared.";
+            Debug.Log("[StreamingUI] Cleared all point clouds");
         }
 
         void OnDictationListeningChanged(bool listening)

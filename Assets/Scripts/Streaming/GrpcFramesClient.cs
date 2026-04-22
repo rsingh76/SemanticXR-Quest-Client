@@ -35,6 +35,13 @@ namespace SemanticXR.Streaming
         int _sendQueueCount;
         const int MaxQueueSize = 5;
 
+        // Hoisted out of SendLoop so Stop() can dispose them from any thread
+        // to abort pending gRPC operations fast instead of waiting for graceful
+        // close. Without this, Disconnect feels hung for several seconds.
+        YetAnotherHttpHandler _yaha;
+        GrpcChannel _channel;
+        AsyncClientStreamingCall<UpstreamSyncMessage_quest, VideoStatus> _call;
+
         public int  QueuedFrames => _sendQueueCount;
         public bool IsConnected  { get; private set; }
         public int  SentFrames   { get; private set; }
@@ -69,25 +76,22 @@ namespace SemanticXR.Streaming
 
         void SendLoop()
         {
-            YetAnotherHttpHandler yaha = null;
-            GrpcChannel channel = null;
-            AsyncClientStreamingCall<UpstreamSyncMessage_quest, VideoStatus> call = null;
-
             try
             {
                 Debug.LogWarning($"[gRPC] Connecting to {_address}:{_port}...");
 
-                yaha = new YetAnotherHttpHandler { Http2Only = true };
-                channel = GrpcChannel.ForAddress($"http://{_address}:{_port}",
+                _yaha = new YetAnotherHttpHandler { Http2Only = true };
+                _channel = GrpcChannel.ForAddress($"http://{_address}:{_port}",
                     new GrpcChannelOptions
                     {
-                        HttpHandler        = yaha,
+                        HttpHandler        = _yaha,
                         MaxSendMessageSize = 100 * 1024 * 1024,
                         DisposeHttpClient  = false,
                     });
 
-                var client = new XrService.XrServiceClient(channel);
-                call = client.UploadSyncMessage_quest();
+                var client = new XrService.XrServiceClient(_channel);
+                _call = client.UploadSyncMessage_quest();
+                var call = _call;      // local alias to keep the inner loop terse
                 IsConnected = true;
                 Debug.LogWarning($"[gRPC] Connected to {_address}:{_port}");
 
@@ -119,13 +123,9 @@ namespace SemanticXR.Streaming
                     }
                 }
 
-                // Graceful shutdown: close the client stream and wait for server ack.
-                try
-                {
-                    call.RequestStream.CompleteAsync().Wait(2000);
-                    _ = call.ResponseAsync;  // discard; we don't need the VideoStatus
-                }
-                catch { /* best effort */ }
+                // Best-effort close — short timeout because Stop() may already
+                // have disposed the call to force-abort.
+                try { call.RequestStream.CompleteAsync().Wait(300); } catch { }
             }
             catch (Exception ex)
             {
@@ -135,9 +135,10 @@ namespace SemanticXR.Streaming
             }
             finally
             {
-                try { call?.Dispose();    } catch { }
-                try { channel?.Dispose(); } catch { }
-                try { yaha?.Dispose();    } catch { }
+                try { _call?.Dispose();    } catch { }
+                try { _channel?.Dispose(); } catch { }
+                try { _yaha?.Dispose();    } catch { }
+                _call = null; _channel = null; _yaha = null;
                 IsConnected = false;
             }
         }
@@ -212,7 +213,11 @@ namespace SemanticXR.Streaming
         public void Stop()
         {
             _running = false;
-            _sendThread?.Join(3000);
+            // Force-abort any in-flight gRPC send/receive — much faster than
+            // waiting for a graceful CompleteAsync round-trip.
+            try { _call?.Dispose();    } catch { }
+            try { _channel?.Dispose(); } catch { }
+            _sendThread?.Join(500);
         }
 
         public void Dispose() => Stop();
