@@ -52,7 +52,7 @@ namespace SemanticXR.UI
         Button _clearBtn;
         Image _micBtnBg;
         GameObject _micIconGroup, _stopIconGroup;
-        TextMeshProUGUI _dictationText, _dictationStatus;
+        TextMeshProUGUI _dictationText;
         static readonly Color MicIdleColor = new Color(0.15f, 0.45f, 0.75f);
         static readonly Color MicActiveColor = new Color(0.85f, 0.2f, 0.2f);
 
@@ -170,7 +170,7 @@ namespace SemanticXR.UI
             _fpsLabel = Mk.Label(_connectPanel.transform, _selectedFps.ToString(), new Vector2(-60, -15), 20, Color.white);
             Mk.Btn(_connectPanel.transform, ">", new Vector2(-10, -15), new Vector2(36, 30), new Color(0.3f, 0.3f, 0.4f), 20, () => ChangeFps(1));
 
-            Mk.Label(_connectPanel.transform, "Transport", new Vector2(60, -15), 14, new Color(0.6f, 0.6f, 0.65f), TextAlignmentOptions.MidlineLeft, 100);
+            Mk.Label(_connectPanel.transform, "Transport", new Vector2(115, -15), 14, new Color(0.6f, 0.6f, 0.65f), TextAlignmentOptions.MidlineRight, 100);
             _transportBtn = Mk.Btn(_connectPanel.transform, _orchestrator.Transport.ToString(),
                 new Vector2(220, -15), new Vector2(100, 30),
                 new Color(0.3f, 0.3f, 0.4f), 16, ToggleTransport);
@@ -229,15 +229,6 @@ namespace SemanticXR.UI
             AddTrigger(trig, EventTriggerType.PointerDown,  () => Debug.Log("[StreamingUI] pointer DOWN mic"));
             AddTrigger(trig, EventTriggerType.PointerUp,    () => Debug.Log("[StreamingUI] pointer UP mic"));
             AddTrigger(trig, EventTriggerType.PointerClick, () => Debug.Log("[StreamingUI] pointer CLICK mic"));
-
-            _dictationStatus = Mk.Label(_streamingPanel.transform, "Tap the mic to speak",
-                new Vector2(0, -115), 12, new Color(0.55f, 0.55f, 0.6f));
-            // Clamp the status label so a long error message can't expand the
-            // RectTransform and paint over the rest of the panel.
-            var statusR = _dictationStatus.GetComponent<RectTransform>();
-            statusR.sizeDelta = new Vector2(560, 18);
-            _dictationStatus.overflowMode      = TextOverflowModes.Ellipsis;
-            _dictationStatus.textWrappingMode  = TextWrappingModes.NoWrap;
 
             _clearBtn = Mk.Btn(_streamingPanel.transform, "Clear Points",
                 new Vector2(-160, -140), new Vector2(140, 40),
@@ -310,7 +301,6 @@ namespace SemanticXR.UI
             if (_visualizer != null) _visualizer.Clear();
             if (_dictationText   != null) _dictationText.text = "";
             OnDictationListeningChanged(false);
-            if (_dictationStatus != null) _dictationStatus.text = "Tap the mic to speak";
         }
         void ShowStreaming()
         {
@@ -330,8 +320,6 @@ namespace SemanticXR.UI
         {
             Debug.Log($"[StreamingUI] mic clicked, listening={_audio.IsListening}");
             StartCoroutine(FlashMicButton());
-            if (_dictationStatus != null)
-                _dictationStatus.text = _audio.IsListening ? "Stopping..." : "Tap registered — starting mic...";
             _audio.Toggle();
         }
 
@@ -355,8 +343,11 @@ namespace SemanticXR.UI
 
         void OnAudioStatus(string s)
         {
-            if (_dictationStatus != null) _dictationStatus.text = s;
-            if (_dictationText   != null) _dictationText.text   = s;  // also echo to the text box for now
+            // Verbose per-query status ("Sending X KB...", "Sent. Server
+            // returned N point clouds.") goes only to the text box. The short
+            // button-state strings ("Listening...", "Tap the mic to speak")
+            // are written separately by OnDictationListeningChanged.
+            if (_dictationText != null) _dictationText.text = s;
         }
 
         void OnPointCloudsReceived(XrVis.allPointClouds response)
@@ -387,14 +378,13 @@ namespace SemanticXR.UI
             }
             if (_micIconGroup  != null) _micIconGroup.SetActive(!listening);
             if (_stopIconGroup != null) _stopIconGroup.SetActive(listening);
-            if (_dictationStatus != null) _dictationStatus.text = listening ? "Listening..." : "Tap the mic to speak";
         }
 
         void OnDictationErrorReceived(string msg)
         {
             Debug.LogWarning($"[StreamingUI] dictation error: {msg}");
-            if (_dictationStatus != null && !string.IsNullOrEmpty(msg))
-                _dictationStatus.text = $"<color=#ff6b6b>Error: {msg}</color>";
+            if (_dictationText != null && !string.IsNullOrEmpty(msg))
+                _dictationText.text = $"<color=#ff6b6b>Error: {msg}</color>";
             // Button state is user-intent driven — do not flip it on error.
         }
 
