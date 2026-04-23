@@ -25,28 +25,28 @@ namespace XrVis {
       byte[] descriptorData = global::System.Convert.FromBase64String(
           string.Concat(
             "Cgl2aXMucHJvdG8SBXhyVmlzIkIKClBvaW50Q2xvdWQSDgoGcG9pbnRzGAEg",
-            "AygCEhIKCm51bV9wb2ludHMYAyABKAUSEAoIY2VudHJvaWQYBCADKAIifwoO",
-            "YWxsUG9pbnRDbG91ZHMSJgoLcG9pbnRDbG91ZHMYASADKAsyES54clZpcy5Q",
-            "b2ludENsb3VkEg4KBmNvbG9ycxgCIAMoAhIWCg5udW1Qb2ludENsb3VkcxgD",
-            "IAEoBRIdChVzZXJ2ZXJRdWVyeVByb2Nlc3NpbmcYBCABKAIieQoHT2JqZWN0",
-            "cxISCgpwb2ludENsb3VkGAEgAygCEgwKBEJCb3gYAiADKAISFwoPY2xpcF9l",
-            "bWJlZGRpbmdzGAMgAygCEhIKCm51bV9wb2ludHMYBCABKAUSEAoIY2VudHJv",
-            "aWQYBSADKAISDQoFaW5kZXgYBiABKAUiqAEKDG9iamVjdFVwZGF0ZRIfCgdv",
-            "YmplY3RzGAEgAygLMg4ueHJWaXMuT2JqZWN0cxITCgtudW1fb2JqZWN0cxgC",
-            "IAEoBRIWCg5yZW1vdmVfaW5kaWNlcxgDIAMoBRIcChRzZXJ2ZXJQcm9jZXNz",
-            "TGF0ZW5jeRgEIAEoAhITCgtmcmFtZU51bWJlchgFIAMoBRIXCg9jbGllbnRU",
-            "aW1lU3RhbXAYBiABKAMiGQoGU3RhdHVzEg8KB21lc3NhZ2UYASABKAgiMgoJ",
-            "QXVkaW9GaWxlEhIKCmNodW5rX2RhdGEYASABKAwSEQoJdGV4dFF1ZXJ5GAIg",
-            "ASgJMrQBChBWaXN1YWxpemVyU2VydmVyEjwKD2NsaWVudFRleHRRdWVyeRIQ",
-            "LnhyVmlzLkF1ZGlvRmlsZRoVLnhyVmlzLmFsbFBvaW50Q2xvdWRzKAESKQoJ",
-            "dXBkYXRlTWFwEg0ueHJWaXMuU3RhdHVzGg0ueHJWaXMuU3RhdHVzEjcKD3Vw",
-            "ZGF0ZURldmljZU1hcBITLnhyVmlzLm9iamVjdFVwZGF0ZRoNLnhyVmlzLlN0",
-            "YXR1cygBYgZwcm90bzM="));
+            "AygCEhIKCm51bV9wb2ludHMYAyABKAUSEAoIY2VudHJvaWQYBCADKAIikgEK",
+            "DmFsbFBvaW50Q2xvdWRzEiYKC3BvaW50Q2xvdWRzGAEgAygLMhEueHJWaXMu",
+            "UG9pbnRDbG91ZBIOCgZjb2xvcnMYAiADKAISFgoObnVtUG9pbnRDbG91ZHMY",
+            "AyABKAUSHQoVc2VydmVyUXVlcnlQcm9jZXNzaW5nGAQgASgCEhEKCXRleHRR",
+            "dWVyeRgFIAEoCSJ5CgdPYmplY3RzEhIKCnBvaW50Q2xvdWQYASADKAISDAoE",
+            "QkJveBgCIAMoAhIXCg9jbGlwX2VtYmVkZGluZ3MYAyADKAISEgoKbnVtX3Bv",
+            "aW50cxgEIAEoBRIQCghjZW50cm9pZBgFIAMoAhINCgVpbmRleBgGIAEoBSKo",
+            "AQoMb2JqZWN0VXBkYXRlEh8KB29iamVjdHMYASADKAsyDi54clZpcy5PYmpl",
+            "Y3RzEhMKC251bV9vYmplY3RzGAIgASgFEhYKDnJlbW92ZV9pbmRpY2VzGAMg",
+            "AygFEhwKFHNlcnZlclByb2Nlc3NMYXRlbmN5GAQgASgCEhMKC2ZyYW1lTnVt",
+            "YmVyGAUgAygFEhcKD2NsaWVudFRpbWVTdGFtcBgGIAEoAyIZCgZTdGF0dXMS",
+            "DwoHbWVzc2FnZRgBIAEoCCIyCglBdWRpb0ZpbGUSEgoKY2h1bmtfZGF0YRgB",
+            "IAEoDBIRCgl0ZXh0UXVlcnkYAiABKAkytAEKEFZpc3VhbGl6ZXJTZXJ2ZXIS",
+            "PAoPY2xpZW50VGV4dFF1ZXJ5EhAueHJWaXMuQXVkaW9GaWxlGhUueHJWaXMu",
+            "YWxsUG9pbnRDbG91ZHMoARIpCgl1cGRhdGVNYXASDS54clZpcy5TdGF0dXMa",
+            "DS54clZpcy5TdGF0dXMSNwoPdXBkYXRlRGV2aWNlTWFwEhMueHJWaXMub2Jq",
+            "ZWN0VXBkYXRlGg0ueHJWaXMuU3RhdHVzKAFiBnByb3RvMw=="));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
           new pbr::GeneratedClrTypeInfo(null, null, new pbr::GeneratedClrTypeInfo[] {
             new pbr::GeneratedClrTypeInfo(typeof(global::XrVis.PointCloud), global::XrVis.PointCloud.Parser, new[]{ "Points", "NumPoints", "Centroid" }, null, null, null, null),
-            new pbr::GeneratedClrTypeInfo(typeof(global::XrVis.allPointClouds), global::XrVis.allPointClouds.Parser, new[]{ "PointClouds", "Colors", "NumPointClouds", "ServerQueryProcessing" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::XrVis.allPointClouds), global::XrVis.allPointClouds.Parser, new[]{ "PointClouds", "Colors", "NumPointClouds", "ServerQueryProcessing", "TextQuery" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::XrVis.Objects), global::XrVis.Objects.Parser, new[]{ "PointCloud", "BBox", "ClipEmbeddings", "NumPoints", "Centroid", "Index" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::XrVis.objectUpdate), global::XrVis.objectUpdate.Parser, new[]{ "Objects", "NumObjects", "RemoveIndices", "ServerProcessLatency", "FrameNumber", "ClientTimeStamp" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::XrVis.Status), global::XrVis.Status.Parser, new[]{ "Message" }, null, null, null, null),
@@ -350,6 +350,7 @@ namespace XrVis {
       colors_ = other.colors_.Clone();
       numPointClouds_ = other.numPointClouds_;
       serverQueryProcessing_ = other.serverQueryProcessing_;
+      textQuery_ = other.textQuery_;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -405,6 +406,18 @@ namespace XrVis {
       }
     }
 
+    /// <summary>Field number for the "textQuery" field.</summary>
+    public const int TextQueryFieldNumber = 5;
+    private string textQuery_ = "";
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public string TextQuery {
+      get { return textQuery_; }
+      set {
+        textQuery_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
+      }
+    }
+
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public override bool Equals(object other) {
@@ -424,6 +437,7 @@ namespace XrVis {
       if(!colors_.Equals(other.colors_)) return false;
       if (NumPointClouds != other.NumPointClouds) return false;
       if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(ServerQueryProcessing, other.ServerQueryProcessing)) return false;
+      if (TextQuery != other.TextQuery) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -435,6 +449,7 @@ namespace XrVis {
       hash ^= colors_.GetHashCode();
       if (NumPointClouds != 0) hash ^= NumPointClouds.GetHashCode();
       if (ServerQueryProcessing != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(ServerQueryProcessing);
+      if (TextQuery.Length != 0) hash ^= TextQuery.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -463,6 +478,10 @@ namespace XrVis {
         output.WriteRawTag(37);
         output.WriteFloat(ServerQueryProcessing);
       }
+      if (TextQuery.Length != 0) {
+        output.WriteRawTag(42);
+        output.WriteString(TextQuery);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -483,6 +502,10 @@ namespace XrVis {
         output.WriteRawTag(37);
         output.WriteFloat(ServerQueryProcessing);
       }
+      if (TextQuery.Length != 0) {
+        output.WriteRawTag(42);
+        output.WriteString(TextQuery);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(ref output);
       }
@@ -500,6 +523,9 @@ namespace XrVis {
       }
       if (ServerQueryProcessing != 0F) {
         size += 1 + 4;
+      }
+      if (TextQuery.Length != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeStringSize(TextQuery);
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -520,6 +546,9 @@ namespace XrVis {
       }
       if (other.ServerQueryProcessing != 0F) {
         ServerQueryProcessing = other.ServerQueryProcessing;
+      }
+      if (other.TextQuery.Length != 0) {
+        TextQuery = other.TextQuery;
       }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
@@ -557,6 +586,10 @@ namespace XrVis {
             ServerQueryProcessing = input.ReadFloat();
             break;
           }
+          case 42: {
+            TextQuery = input.ReadString();
+            break;
+          }
         }
       }
     #endif
@@ -591,6 +624,10 @@ namespace XrVis {
           }
           case 37: {
             ServerQueryProcessing = input.ReadFloat();
+            break;
+          }
+          case 42: {
+            TextQuery = input.ReadString();
             break;
           }
         }

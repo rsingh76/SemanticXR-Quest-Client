@@ -354,7 +354,8 @@ namespace SemanticXR.UI
         {
             if (_visualizer == null || response == null) return;
             var (objects, points) = _visualizer.AddResponse(response);
-            string msg = $"Found {objects} objects, {points} points ({response.ServerQueryProcessing:F0} ms)";
+            string query = string.IsNullOrEmpty(response.TextQuery) ? "(none)" : response.TextQuery;
+            string msg = $"Query: {query}\nReceived: {objects} objects, {points} points ({response.ServerQueryProcessing:F0} ms)";
             Debug.Log($"[StreamingUI] {msg}");
             if (_dictationText != null) _dictationText.text = msg;
         }

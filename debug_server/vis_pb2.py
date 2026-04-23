@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\tvis.proto\x12\x05xrVis\"B\n\nPointCloud\x12\x0e\n\x06points\x18\x01 \x03(\x02\x12\x12\n\nnum_points\x18\x03 \x01(\x05\x12\x10\n\x08\x63\x65ntroid\x18\x04 \x03(\x02\"\x7f\n\x0e\x61llPointClouds\x12&\n\x0bpointClouds\x18\x01 \x03(\x0b\x32\x11.xrVis.PointCloud\x12\x0e\n\x06\x63olors\x18\x02 \x03(\x02\x12\x16\n\x0enumPointClouds\x18\x03 \x01(\x05\x12\x1d\n\x15serverQueryProcessing\x18\x04 \x01(\x02\"y\n\x07Objects\x12\x12\n\npointCloud\x18\x01 \x03(\x02\x12\x0c\n\x04\x42\x42ox\x18\x02 \x03(\x02\x12\x17\n\x0f\x63lip_embeddings\x18\x03 \x03(\x02\x12\x12\n\nnum_points\x18\x04 \x01(\x05\x12\x10\n\x08\x63\x65ntroid\x18\x05 \x03(\x02\x12\r\n\x05index\x18\x06 \x01(\x05\"\xa8\x01\n\x0cobjectUpdate\x12\x1f\n\x07objects\x18\x01 \x03(\x0b\x32\x0e.xrVis.Objects\x12\x13\n\x0bnum_objects\x18\x02 \x01(\x05\x12\x16\n\x0eremove_indices\x18\x03 \x03(\x05\x12\x1c\n\x14serverProcessLatency\x18\x04 \x01(\x02\x12\x13\n\x0b\x66rameNumber\x18\x05 \x03(\x05\x12\x17\n\x0f\x63lientTimeStamp\x18\x06 \x01(\x03\"\x19\n\x06Status\x12\x0f\n\x07message\x18\x01 \x01(\x08\"2\n\tAudioFile\x12\x12\n\nchunk_data\x18\x01 \x01(\x0c\x12\x11\n\ttextQuery\x18\x02 \x01(\t2\xb4\x01\n\x10VisualizerServer\x12<\n\x0f\x63lientTextQuery\x12\x10.xrVis.AudioFile\x1a\x15.xrVis.allPointClouds(\x01\x12)\n\tupdateMap\x12\r.xrVis.Status\x1a\r.xrVis.Status\x12\x37\n\x0fupdateDeviceMap\x12\x13.xrVis.objectUpdate\x1a\r.xrVis.Status(\x01\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\tvis.proto\x12\x05xrVis\"B\n\nPointCloud\x12\x0e\n\x06points\x18\x01 \x03(\x02\x12\x12\n\nnum_points\x18\x03 \x01(\x05\x12\x10\n\x08\x63\x65ntroid\x18\x04 \x03(\x02\"\x92\x01\n\x0e\x61llPointClouds\x12&\n\x0bpointClouds\x18\x01 \x03(\x0b\x32\x11.xrVis.PointCloud\x12\x0e\n\x06\x63olors\x18\x02 \x03(\x02\x12\x16\n\x0enumPointClouds\x18\x03 \x01(\x05\x12\x1d\n\x15serverQueryProcessing\x18\x04 \x01(\x02\x12\x11\n\ttextQuery\x18\x05 \x01(\t\"y\n\x07Objects\x12\x12\n\npointCloud\x18\x01 \x03(\x02\x12\x0c\n\x04\x42\x42ox\x18\x02 \x03(\x02\x12\x17\n\x0f\x63lip_embeddings\x18\x03 \x03(\x02\x12\x12\n\nnum_points\x18\x04 \x01(\x05\x12\x10\n\x08\x63\x65ntroid\x18\x05 \x03(\x02\x12\r\n\x05index\x18\x06 \x01(\x05\"\xa8\x01\n\x0cobjectUpdate\x12\x1f\n\x07objects\x18\x01 \x03(\x0b\x32\x0e.xrVis.Objects\x12\x13\n\x0bnum_objects\x18\x02 \x01(\x05\x12\x16\n\x0eremove_indices\x18\x03 \x03(\x05\x12\x1c\n\x14serverProcessLatency\x18\x04 \x01(\x02\x12\x13\n\x0b\x66rameNumber\x18\x05 \x03(\x05\x12\x17\n\x0f\x63lientTimeStamp\x18\x06 \x01(\x03\"\x19\n\x06Status\x12\x0f\n\x07message\x18\x01 \x01(\x08\"2\n\tAudioFile\x12\x12\n\nchunk_data\x18\x01 \x01(\x0c\x12\x11\n\ttextQuery\x18\x02 \x01(\t2\xb4\x01\n\x10VisualizerServer\x12<\n\x0f\x63lientTextQuery\x12\x10.xrVis.AudioFile\x1a\x15.xrVis.allPointClouds(\x01\x12)\n\tupdateMap\x12\r.xrVis.Status\x1a\r.xrVis.Status\x12\x37\n\x0fupdateDeviceMap\x12\x13.xrVis.objectUpdate\x1a\r.xrVis.Status(\x01\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -33,16 +33,16 @@ if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_POINTCLOUD']._serialized_start=20
   _globals['_POINTCLOUD']._serialized_end=86
-  _globals['_ALLPOINTCLOUDS']._serialized_start=88
-  _globals['_ALLPOINTCLOUDS']._serialized_end=215
-  _globals['_OBJECTS']._serialized_start=217
-  _globals['_OBJECTS']._serialized_end=338
-  _globals['_OBJECTUPDATE']._serialized_start=341
-  _globals['_OBJECTUPDATE']._serialized_end=509
-  _globals['_STATUS']._serialized_start=511
-  _globals['_STATUS']._serialized_end=536
-  _globals['_AUDIOFILE']._serialized_start=538
-  _globals['_AUDIOFILE']._serialized_end=588
-  _globals['_VISUALIZERSERVER']._serialized_start=591
-  _globals['_VISUALIZERSERVER']._serialized_end=771
+  _globals['_ALLPOINTCLOUDS']._serialized_start=89
+  _globals['_ALLPOINTCLOUDS']._serialized_end=235
+  _globals['_OBJECTS']._serialized_start=237
+  _globals['_OBJECTS']._serialized_end=358
+  _globals['_OBJECTUPDATE']._serialized_start=361
+  _globals['_OBJECTUPDATE']._serialized_end=529
+  _globals['_STATUS']._serialized_start=531
+  _globals['_STATUS']._serialized_end=556
+  _globals['_AUDIOFILE']._serialized_start=558
+  _globals['_AUDIOFILE']._serialized_end=608
+  _globals['_VISUALIZERSERVER']._serialized_start=611
+  _globals['_VISUALIZERSERVER']._serialized_end=791
 # @@protoc_insertion_point(module_scope)
