@@ -60,6 +60,11 @@ namespace SemanticXR.UI
             get { int n = 0; foreach (var b in _batches) n += b.Count; return n; }
         }
 
+        // One world-space centroid per rendered cluster, in the order AddResponse
+        // added them. Consumed by OffscreenPointCloudArrow to pick what to point at.
+        readonly List<Vector3> _centroids = new();
+        public IReadOnlyList<Vector3> Centroids => _centroids;
+
         // Adds all clusters in `response` as a single batch.
         // Returns (numObjects, numPoints) for UI feedback.
         public (int objects, int points) AddResponse(allPointClouds response)
@@ -91,13 +96,17 @@ namespace SemanticXR.UI
                 int available = cloud.Points.Count / 3;
                 if (available < n) n = available;
 
+                Vector3 sum = Vector3.zero;
                 for (int i = 0; i < n; i++)
                 {
                     float x = cloud.Points[i * 3];
                     float y = cloud.Points[i * 3 + 1];
                     float z = -cloud.Points[i * 3 + 2];    // RH → LH handedness flip
-                    batch.Add(CreateSphere(new Vector3(x, y, z), color));
+                    var p = new Vector3(x, y, z);
+                    batch.Add(CreateSphere(p, color));
+                    sum += p;
                 }
+                if (n > 0) _centroids.Add(sum / n);
                 pointTotal += n;
             }
 
@@ -111,6 +120,7 @@ namespace SemanticXR.UI
                 foreach (var go in batch)
                     if (go != null) Destroy(go);
             _batches.Clear();
+            _centroids.Clear();
         }
 
         void OnDestroy()

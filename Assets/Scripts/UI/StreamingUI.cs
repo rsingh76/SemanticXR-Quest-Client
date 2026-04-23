@@ -114,6 +114,14 @@ namespace SemanticXR.UI
             pcHost.transform.SetParent(transform, worldPositionStays: false);
             _visualizer = pcHost.AddComponent<PointCloudVisualizer>();
 
+            // Offscreen-arrow hint: head-locked arrow that appears at the edge
+            // of the viewport whenever any rendered centroid is outside the
+            // camera frustum. Sibling to PointClouds so it shares the session's
+            // world-space origin.
+            var arrowHost = new GameObject("OffscreenArrow");
+            arrowHost.transform.SetParent(transform, worldPositionStays: false);
+            arrowHost.AddComponent<OffscreenPointCloudArrow>().Bind(_visualizer);
+
             // Initial frames port follows whichever transport the orchestrator
             // defaults to. Kept in sync on toggle via ToggleTransport().
             _portString = DefaultPortFor(_orchestrator.Transport);
@@ -750,7 +758,7 @@ namespace SemanticXR.UI
     // Textures are 128x128 RGBA, cached as static singletons.
     static class IconFactory
     {
-        static Sprite _mic, _stop, _circle, _trash, _power, _triDown;
+        static Sprite _mic, _stop, _circle, _trash, _power, _triDown, _arrow;
 
         public static Sprite Mic     => _mic     ??= BuildMic();
         public static Sprite Stop    => _stop    ??= BuildStop();
@@ -758,6 +766,7 @@ namespace SemanticXR.UI
         public static Sprite Trash   => _trash   ??= BuildTrash();
         public static Sprite Power   => _power   ??= BuildPower();
         public static Sprite TriDown => _triDown ??= BuildTriDown();
+        public static Sprite Arrow   => _arrow   ??= BuildArrow();
 
         const int Size = 128;
 
@@ -830,6 +839,23 @@ namespace SemanticXR.UI
             return MakeSprite(px);
         }
 
+        static Sprite BuildArrow()
+        {
+            var px = ClearBuffer();
+            // Right-pointing rounded isoceles triangle on 128x128.
+            // Elongated horizontally (100 wide × 56 tall → 1.8:1) so the tip
+            // direction reads unambiguously from any rotation. Corners rounded
+            // by 8 px for a soft modern look.
+            //   Apex: (114, 64)
+            //   Base: (14, 36) bottom — (14, 92) top
+            FillRoundedTriangle(px,
+                ax: 14f,  ay: 36f,
+                bx: 114f, by: 64f,
+                cx: 14f,  cy: 92f,
+                radius: 8f, color: Color.white);
+            return MakeSprite(px);
+        }
+
         static Color32[] ClearBuffer()
         {
             var px = new Color32[Size * Size];
@@ -897,6 +923,81 @@ namespace SemanticXR.UI
                     float axR = Mathf.Clamp01(0.5f + xR - pxF);
                     float a = ayBot * ayTop * axL * axR;
                     if (a <= 0) continue;
+                    int idx = y * Size + x;
+                    byte newA = (byte)Mathf.RoundToInt(color.a * a * 255f);
+                    if (newA > px[idx].a)
+                        px[idx] = new Color32(
+                            (byte)Mathf.RoundToInt(color.r * 255f),
+                            (byte)Mathf.RoundToInt(color.g * 255f),
+                            (byte)Mathf.RoundToInt(color.b * 255f),
+                            newA);
+                }
+            }
+        }
+
+        // Rounded filled triangle with vertices (ax,ay), (bx,by), (cx,cy) and
+        // corner radius `radius` (all in pixel units on the 128x128 buffer).
+        // Produces the Minkowski sum of the core triangle with a disc of the
+        // given radius — i.e. corners and edges are rounded uniformly.
+        //
+        // Uses a signed-distance-function (inigo quilez's sdTriangle): for each
+        // pixel, compute signed distance to the triangle boundary (negative
+        // inside), then anti-alias a 1-pixel band around `sdf = radius`.
+        static void FillRoundedTriangle(Color32[] px,
+                                        float ax, float ay,
+                                        float bx, float by,
+                                        float cx, float cy,
+                                        float radius, Color color)
+        {
+            float e0x = bx - ax, e0y = by - ay;
+            float e1x = cx - bx, e1y = cy - by;
+            float e2x = ax - cx, e2y = ay - cy;
+            float e0e0 = e0x * e0x + e0y * e0y;
+            float e1e1 = e1x * e1x + e1y * e1y;
+            float e2e2 = e2x * e2x + e2y * e2y;
+            float s    = Mathf.Sign(e0x * e2y - e0y * e2x);    // winding direction
+
+            float xminF = Mathf.Min(Mathf.Min(ax, bx), cx) - radius - 1f;
+            float xmaxF = Mathf.Max(Mathf.Max(ax, bx), cx) + radius + 1f;
+            float yminF = Mathf.Min(Mathf.Min(ay, by), cy) - radius - 1f;
+            float ymaxF = Mathf.Max(Mathf.Max(ay, by), cy) + radius + 1f;
+            int xmin = Mathf.Max(0, Mathf.FloorToInt(xminF));
+            int xmax = Mathf.Min(Size - 1, Mathf.CeilToInt(xmaxF));
+            int ymin = Mathf.Max(0, Mathf.FloorToInt(yminF));
+            int ymax = Mathf.Min(Size - 1, Mathf.CeilToInt(ymaxF));
+
+            for (int y = ymin; y <= ymax; y++)
+            {
+                float pyF = y + 0.5f;
+                for (int x = xmin; x <= xmax; x++)
+                {
+                    float pxF = x + 0.5f;
+                    float v0x = pxF - ax, v0y = pyF - ay;
+                    float v1x = pxF - bx, v1y = pyF - by;
+                    float v2x = pxF - cx, v2y = pyF - cy;
+
+                    float t0 = Mathf.Clamp01((v0x * e0x + v0y * e0y) / e0e0);
+                    float t1 = Mathf.Clamp01((v1x * e1x + v1y * e1y) / e1e1);
+                    float t2 = Mathf.Clamp01((v2x * e2x + v2y * e2y) / e2e2);
+
+                    float pq0x = v0x - e0x * t0, pq0y = v0y - e0y * t0;
+                    float pq1x = v1x - e1x * t1, pq1y = v1y - e1y * t1;
+                    float pq2x = v2x - e2x * t2, pq2y = v2y - e2y * t2;
+
+                    float d0 = pq0x * pq0x + pq0y * pq0y;
+                    float d1 = pq1x * pq1x + pq1y * pq1y;
+                    float d2 = pq2x * pq2x + pq2y * pq2y;
+                    float minD2 = Mathf.Min(Mathf.Min(d0, d1), d2);
+
+                    float w0 = s * (v0x * e0y - v0y * e0x);
+                    float w1 = s * (v1x * e1y - v1y * e1x);
+                    float w2 = s * (v2x * e2y - v2y * e2x);
+                    float minW = Mathf.Min(Mathf.Min(w0, w1), w2);
+
+                    float sdf = -Mathf.Sqrt(minD2) * Mathf.Sign(minW);
+                    float a   = Mathf.Clamp01(0.5f + radius - sdf);
+                    if (a <= 0) continue;
+
                     int idx = y * Size + x;
                     byte newA = (byte)Mathf.RoundToInt(color.a * a * 255f);
                     if (newA > px[idx].a)

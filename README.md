@@ -157,6 +157,66 @@ Assets/
 | `TcpProtoClient.cs` | Alternative TCP-based protobuf streaming client |
 | `ManifestPostProcessor.cs` | Patches Android manifest and app name at build time |
 
+## UI Customization
+
+The streaming UI has three movable pieces, each with its own motion model:
+
+| Piece | Motion | Where defined |
+|---|---|---|
+| **Connect / Streaming panels** (`StreamCanvas`) | Body-locked, repositioned only on Connect or Recall | [`StreamingUI.BuildUI()`](Assets/Scripts/UI/StreamingUI.cs) |
+| **Mic Orb** (mic / clear / disconnect buttons) | Body-locked with damped yaw + position following | [`StreamingUI.UpdateMicOrbPose()`](Assets/Scripts/UI/StreamingUI.cs) |
+| **Offscreen Arrow** (points to point-clouds outside the frustum) | Head-locked (no damping) | [`OffscreenPointCloudArrow.cs`](Assets/Scripts/UI/OffscreenPointCloudArrow.cs) |
+
+All tunables are `[SerializeField]` on the relevant MonoBehaviours, so the fastest way to find a sweet spot is to **edit values in the Unity Inspector while in Play mode** (iterate live, then copy the values back to defaults).
+
+### Mic Orb damping
+
+Fields on `StreamingUI`, under `[Header("Mic Orb (Body-Locked)")]`:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `micOrbDistance` | `0.55` m | How far in front of you the orb sits |
+| `micOrbVerticalOffset` | `-0.35` m | Vertical offset from head (negative = below eye line, roughly chest height) |
+| `micOrbPosSmoothTime` | `0.3` s | `Vector3.SmoothDamp` time constant for position follow |
+| `micOrbYawSmoothTime` | `1.2` s | Exponential time constant for the orb's body-forward to track head yaw |
+
+**Mental model:**
+- `micOrbYawSmoothTime` is the **body-lock** knob. Smaller = orb snaps around with your head (head-locked feel). Larger = quick head glances don't drag it; sustained body turns do.
+- `micOrbPosSmoothTime` is how snappy the translation follow is when you walk. Larger = orb trails behind like a balloon on a string.
+
+Combinations worth trying:
+
+| Feel | pos | yaw |
+|---|---|---|
+| Glued to camera (head-locked) | `0.05` | `0.1` |
+| Current (smooth, body-locked) | `0.3` | `1.2` |
+| Ghost / stays-behind | `0.6` | `2.5` |
+
+### Offscreen Arrow
+
+Fields on `OffscreenPointCloudArrow`:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `distanceFromCamera` | `0.8` m | Distance from camera to the head-locked arrow canvas |
+| `canvasSizePx` | `1200` | World-space canvas edge length in pixels (scaled by `0.001` to world units) |
+| `arrowRadiusPx` | `480` | Arrow offset from canvas center — larger = closer to screen edge |
+| `arrowSizePx` | `110 × 110` | Arrow sprite size in pixels |
+| `arrowColor` | `(0.4, 0.85, 1.0)` | Tint (soft cyan) |
+
+No damping by design: the arrow snaps 1:1 with head motion so it always points correctly, and hides the instant its target enters the camera frustum.
+
+### Connect / Streaming panel placement
+
+Top of `StreamingUI`:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `distanceFromCamera` | `1.2` m | Where the panel spawns in front of you on Connect / Recall |
+| `verticalOffset` | `-0.1` m | Vertical offset from head height |
+
+The panel does **not** follow you continuously. Press **A** on the right controller to re-center it (+ the mic orb) in front of you — handler is [`TryHandleRecallButton()`](Assets/Scripts/UI/StreamingUI.cs).
+
 ## Depth Capture and 3D Reconstruction
 
 ### Depth Pipeline
