@@ -77,6 +77,7 @@ namespace SemanticXR.UI
         TouchScreenKeyboard _keyboard;
         string _editField;
         bool _positioned;
+        bool _recallWasDown;
 
         [Header("Mic Orb (Body-Locked)")]
         [SerializeField] float micOrbDistance = 0.55f;
@@ -154,6 +155,22 @@ namespace SemanticXR.UI
             pos.y = cam.transform.position.y + verticalOffset;
             _canvas.transform.position = pos;
             _canvas.transform.rotation = Quaternion.LookRotation(pos - cam.transform.position);
+        }
+
+        // Press A on the right controller to snap panel + mic orb back in front of the user.
+        // Does not touch the tracking origin — we just reposition our own world-space GameObjects.
+        void TryHandleRecallButton()
+        {
+            var rh = InputDevices.GetDeviceAtXRNode(XRNode.RightHand);
+            if (!rh.isValid) return;
+            if (!rh.TryGetFeatureValue(CommonUsages.primaryButton, out bool down)) return;
+            if (down && !_recallWasDown)
+            {
+                Position();
+                InitMicOrbPose();
+                Debug.Log("[StreamingUI] Recall (A): repositioned panel and orb");
+            }
+            _recallWasDown = down;
         }
 
         void BuildUI()
@@ -484,6 +501,8 @@ namespace SemanticXR.UI
         void Update()
         {
             if (!_positioned && Camera.main != null) { Position(); _positioned = true; }
+
+            TryHandleRecallButton();
 
             if (_micOrb != null && _micOrb.activeSelf) UpdateMicOrbPose();
 
