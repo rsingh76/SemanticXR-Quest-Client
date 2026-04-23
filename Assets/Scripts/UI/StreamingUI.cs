@@ -20,7 +20,7 @@ namespace SemanticXR.UI
         RectTransform _canvasRect;
         GameObject _connectPanel, _streamingPanel;
 
-        static readonly string[] IpPresets = { "192.168.1.2", "192.168.1.5", "10.195.21.84", "10.193.43.94", "192.168.1.100" };
+        static readonly string[] IpPresets = { "128.174.3.132", "192.168.1.5", "10.195.21.84", "10.193.43.94", "192.168.1.2" };
         int _ipIndex;
         string _ipAddress;
         TextMeshProUGUI _ipLabel;
@@ -48,6 +48,15 @@ namespace SemanticXR.UI
 
         AudioStreamController _audio;
         PointCloudVisualizer  _visualizer;
+
+        // Upstream bandwidth: per-second cumulative byte snapshots over a
+        // 10-second window. Rate = (now - oldest) * 8 / 10s. Updated once
+        // per second from Update().
+        const int BwWindowSec = 10;
+        readonly long[] _bwSnapshots = new long[BwWindowSec];
+        int   _bwIdx;
+        float _bwNextSampleTime;
+        float _bwRateMbps;
         Button _micBtn;
         Button _clearBtn;
         Image _micBtnBg;
@@ -186,11 +195,12 @@ namespace SemanticXR.UI
 
             // Compact stats line in the top-right corner. Center is intentionally
             // left empty for new feature UI (e.g. add-voice-query).
-            // Format: "Sent N · Q M · Drops K · X FPS". Color goes orange on drops.
+            // Format: "Sent N · Q M · Drops K · X FPS · Upstream Y Mbps". Color goes orange on drops.
+            // Rect is right-anchored: width grows leftward from x=150 (the old right edge).
             _statsText = Mk.Label(_streamingPanel.transform, "",
-                new Vector2(-10, 175), 13, new Color(0.55f, 0.55f, 0.6f),
-                TextAlignmentOptions.TopRight, 320);
-            _statsText.GetComponent<RectTransform>().sizeDelta = new Vector2(320, 22);
+                new Vector2(-100, 175), 13, new Color(0.55f, 0.55f, 0.6f),
+                TextAlignmentOptions.TopRight, 500);
+            _statsText.GetComponent<RectTransform>().sizeDelta = new Vector2(500, 22);
 
             // Voice dictation: text box above a mic/stop toggle button.
             Mk.Label(_streamingPanel.transform, "Speak to SemanticXR", new Vector2(0, 85), 14,
@@ -307,6 +317,10 @@ namespace SemanticXR.UI
             _connectPanel.SetActive(false);
             _streamingPanel.SetActive(true);
             _canvasRect.sizeDelta = new Vector2(650, 420);
+            System.Array.Clear(_bwSnapshots, 0, _bwSnapshots.Length);
+            _bwIdx = 0;
+            _bwNextSampleTime = Time.unscaledTime + 1f;
+            _bwRateMbps = 0f;
             // Tell the audio client which server to send to — same IP as the
             // frames stream, separate user-configurable port for the
             // vis_proto VisualizerServer.
@@ -417,13 +431,26 @@ namespace SemanticXR.UI
                     ? $"Connected to {_orchestrator.ServerTarget}"
                     : $"Connecting to {_orchestrator.ServerTarget}...";
 
-                // Compact stats line: Sent · Q · Drops · FPS  (color-coded on drops).
+                // Compact stats line: Sent · Q · Drops · FPS · Upstream  (color-coded on drops).
                 int totalDropped = _orchestrator.TotalDropped;
                 _statsText.color = totalDropped > 0
                     ? new Color(1f, 0.7f, 0.3f)
                     : new Color(0.55f, 0.55f, 0.6f);
                 string fpsStr = _orchestrator.CaptureFps > 0 ? $"{_orchestrator.CaptureFps:F1}" : "—";
-                _statsText.text = $"Sent {_orchestrator.FrameCount} · Q {_orchestrator.QueuedFrames} · Drops {totalDropped} · {fpsStr} FPS";
+
+                if (Time.unscaledTime >= _bwNextSampleTime)
+                {
+                    long cur = _orchestrator.BytesSent;
+                    long old = _bwSnapshots[_bwIdx];
+                    _bwSnapshots[_bwIdx] = cur;
+                    _bwIdx = (_bwIdx + 1) % BwWindowSec;
+                    // Clamp to 0 to absorb the reset at reconnect (cur < old).
+                    long delta = cur - old;
+                    _bwRateMbps = delta > 0 ? delta * 8f / BwWindowSec / 1_000_000f : 0f;
+                    _bwNextSampleTime = Time.unscaledTime + 1f;
+                }
+
+                _statsText.text = $"Sent {_orchestrator.FrameCount} · Q {_orchestrator.QueuedFrames} · Drops {totalDropped} · {fpsStr} FPS · Upstream {_bwRateMbps:F2} Mbps";
             }
         }
     }

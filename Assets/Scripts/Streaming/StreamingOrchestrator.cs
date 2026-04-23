@@ -101,6 +101,7 @@ namespace SemanticXR.Streaming
         public bool IsConnected => _tcp?.IsConnected == true;
         public int FrameCount => _tcp?.SentFrames ?? 0;
         public int QueuedFrames => _tcp?.QueuedFrames ?? 0;
+        public long BytesSent => _tcp?.TotalBytesSent ?? 0;
         public string LastError => _tcp?.LastError;
         public string ServerTarget { get; private set; } = "Not connected";
 

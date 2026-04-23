@@ -7,10 +7,11 @@ namespace SemanticXR.Streaming
     // StreamingOrchestrator doesn't care which transport is behind it.
     public interface IFramesClient : IDisposable
     {
-        int    QueuedFrames { get; }
-        bool   IsConnected  { get; }
-        int    SentFrames   { get; }
-        string LastError    { get; }      // non-null once, nulled out on read
+        int    QueuedFrames    { get; }
+        bool   IsConnected     { get; }
+        int    SentFrames      { get; }
+        long   TotalBytesSent  { get; }   // cumulative payload bytes since Start()
+        string LastError       { get; }   // non-null once, nulled out on read
 
         void Start();
         void Enqueue(FrameData frame);

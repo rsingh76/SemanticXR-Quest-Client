@@ -33,6 +33,9 @@ namespace SemanticXR.Streaming
         public bool IsConnected { get; private set; }
         public int SentFrames { get; private set; }
 
+        long _totalBytesSent;
+        public long TotalBytesSent => Interlocked.Read(ref _totalBytesSent);
+
         volatile string _lastError;
         public string LastError
         {
@@ -209,6 +212,7 @@ namespace SemanticXR.Streaming
             _stream.Write(lenBytes, 0, 4);
             _stream.Write(data, 0, data.Length);
             _stream.Flush();
+            Interlocked.Add(ref _totalBytesSent, data.Length + 4);
 
             _logCounter++;
             if (_logCounter <= 3 || _logCounter % 30 == 0)
