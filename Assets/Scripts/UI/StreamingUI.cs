@@ -189,31 +189,31 @@ namespace SemanticXR.UI
                 itemHeight: 34f, secondaries: ipAddrs);
             Mk.Btn(_connectPanel.transform, "Custom", new Vector2(150, 85), new Vector2(80, 30), new Color(0.3f, 0.3f, 0.4f), 14, () => OpenKB("ip"));
 
-            // Two ports side-by-side: frames (raw TCP or gRPC) and audio (gRPC VisualizerServer).
-            Mk.Label(_connectPanel.transform, "Frames Port", new Vector2(-115, 50), 16, new Color(0.6f, 0.6f, 0.65f));
-            _portLabel = Mk.Label(_connectPanel.transform, _portString, new Vector2(-115, 22), 20, Color.white);
-            Mk.Btn(_connectPanel.transform, "", new Vector2(-115, 22), new Vector2(200, 30), new Color(0.2f, 0.2f, 0.25f, 0.5f), 0, () => OpenKB("port"));
+            // Row 2: three columns — frames port (TCP/gRPC), audio port (gRPC VisualizerServer), and Transport toggle.
+            Mk.Label(_connectPanel.transform, "Frames Port", new Vector2(-175, 45), 16, new Color(0.6f, 0.6f, 0.65f));
+            _portLabel = Mk.Label(_connectPanel.transform, _portString, new Vector2(-175, 17), 20, Color.white);
+            Mk.Btn(_connectPanel.transform, "", new Vector2(-175, 17), new Vector2(160, 30), new Color(0.2f, 0.2f, 0.25f, 0.5f), 0, () => OpenKB("port"));
 
-            Mk.Label(_connectPanel.transform, "Audio Port", new Vector2(115, 50), 16, new Color(0.6f, 0.6f, 0.65f));
-            _audioPortLabel = Mk.Label(_connectPanel.transform, _audioPortString, new Vector2(115, 22), 20, Color.white);
-            Mk.Btn(_connectPanel.transform, "", new Vector2(115, 22), new Vector2(200, 30), new Color(0.2f, 0.2f, 0.25f, 0.5f), 0, () => OpenKB("audioPort"));
+            Mk.Label(_connectPanel.transform, "Audio Port", new Vector2(0, 45), 16, new Color(0.6f, 0.6f, 0.65f));
+            _audioPortLabel = Mk.Label(_connectPanel.transform, _audioPortString, new Vector2(0, 17), 20, Color.white);
+            Mk.Btn(_connectPanel.transform, "", new Vector2(0, 17), new Vector2(160, 30), new Color(0.2f, 0.2f, 0.25f, 0.5f), 0, () => OpenKB("audioPort"));
 
-            Mk.Label(_connectPanel.transform, "FPS", new Vector2(-220, -15), 16, new Color(0.6f, 0.6f, 0.65f), TextAlignmentOptions.MidlineRight, 160);
+            Mk.Label(_connectPanel.transform, "Transport", new Vector2(175, 45), 16, new Color(0.6f, 0.6f, 0.65f));
+            _transportBtn = Mk.Btn(_connectPanel.transform, _orchestrator.Transport.ToString(),
+                new Vector2(175, 17), new Vector2(160, 30),
+                new Color(0.3f, 0.3f, 0.4f), 16, ToggleTransport);
+            _transportLabel = _transportBtn.GetComponentInChildren<TextMeshProUGUI>();
+
+            Mk.Label(_connectPanel.transform, "FPS", new Vector2(-150, -35), 16, new Color(0.6f, 0.6f, 0.65f), TextAlignmentOptions.MidlineRight, 160);
             var fpsStrings = new string[FpsOptions.Length];
             for (int i = 0; i < FpsOptions.Length; i++) fpsStrings[i] = FpsOptions[i].ToString();
-            _fpsDropdown = Mk.Dropdown(_connectPanel.transform, new Vector2(-40, -15), new Vector2(140, 30),
+            _fpsDropdown = Mk.Dropdown(_connectPanel.transform, new Vector2(30, -35), new Vector2(140, 30),
                 fpsStrings, _fpsIndex,
                 i => { _fpsIndex = i; _selectedFps = FpsOptions[i]; },
                 openUpward: true, itemHeight: 22f, itemFontSize: 15f, arrowRightMargin: 18f);
 
-            Mk.Label(_connectPanel.transform, "Transport", new Vector2(115, -15), 14, new Color(0.6f, 0.6f, 0.65f), TextAlignmentOptions.MidlineRight, 100);
-            _transportBtn = Mk.Btn(_connectPanel.transform, _orchestrator.Transport.ToString(),
-                new Vector2(220, -15), new Vector2(100, 30),
-                new Color(0.3f, 0.3f, 0.4f), 16, ToggleTransport);
-            _transportLabel = _transportBtn.GetComponentInChildren<TextMeshProUGUI>();
-
-            _connectBtn = Mk.Btn(_connectPanel.transform, "Connect", new Vector2(0, -65), new Vector2(220, 50), new Color(0.15f, 0.55f, 0.25f), 24, OnConnect);
-            _errorText = Mk.Label(_connectPanel.transform, "", new Vector2(0, -110), 15, new Color(1f, 0.4f, 0.4f));
+            _connectBtn = Mk.Btn(_connectPanel.transform, "Connect", new Vector2(0, -90), new Vector2(220, 50), new Color(0.15f, 0.55f, 0.25f), 24, OnConnect);
+            _errorText = Mk.Label(_connectPanel.transform, "", new Vector2(0, -140), 15, new Color(1f, 0.4f, 0.4f));
 
             _streamingPanel = Mk.Panel(bg.transform, "Streaming", Color.clear);
             Mk.Stretch(_streamingPanel, 20);
