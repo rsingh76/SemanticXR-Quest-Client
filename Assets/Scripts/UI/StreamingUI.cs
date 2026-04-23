@@ -20,10 +20,19 @@ namespace SemanticXR.UI
         RectTransform _canvasRect;
         GameObject _connectPanel, _streamingPanel;
 
-        static readonly string[] IpPresets = { "128.174.3.132", "192.168.1.5", "10.195.21.84", "10.193.43.94", "192.168.1.2" };
+        // EDIT THE FIRST STRING IN EACH PAIR to change the friendly name shown
+        // on the dropdown. The second string is the actual IP. Keep names short
+        // (≤ ~14 chars) so they fit comfortably on the 260-wide display button.
+        static readonly (string name, string ip)[] IpPresets =
+        {
+            ("Demo (Arches)",    "128.174.3.132"),
+            ("Debug Laptop (Home)",   "192.168.1.2"),
+            ("Everglades", "10.195.21.84"),
+            ("Debug Laptop (Lab)", "10.193.43.94"),
+        };
         int _ipIndex;
         string _ipAddress;
-        TextMeshProUGUI _ipLabel;
+        Mk.DropdownHandle _ipDropdown;
 
         // Mirror production: the real server talks gRPC on 50051, so gRPC
         // debug/prod lives at 50051. TCP debug server moves to 50055.
@@ -35,10 +44,10 @@ namespace SemanticXR.UI
         string _audioPortString = "50054";
         TextMeshProUGUI _audioPortLabel;
 
-        static readonly int[] FpsOptions = { 2, 3, 5, 6, 7, 10, 15, 20, 25, 30 };
+        static readonly int[] FpsOptions = { 2, 3, 5, 6, 7, 10, 15, 20, 25 };
         int _fpsIndex;
         int _selectedFps = 2;
-        TextMeshProUGUI _fpsLabel;
+        Mk.DropdownHandle _fpsDropdown;
 
         Button _transportBtn;
         TextMeshProUGUI _transportLabel;
@@ -69,9 +78,20 @@ namespace SemanticXR.UI
         string _editField;
         bool _positioned;
 
+        [Header("Mic Orb (Body-Locked)")]
+        [SerializeField] float micOrbDistance = 0.55f;
+        [SerializeField] float micOrbVerticalOffset = -0.35f;
+        [SerializeField] float micOrbPosSmoothTime = 0.3f;
+        // Larger = slower yaw catch-up. Head twists don't drag the orb; body turns do.
+        [SerializeField] float micOrbYawSmoothTime = 1.2f;
+
+        GameObject _micOrb;
+        Vector3 _orbBodyForward = Vector3.forward;
+        Vector3 _orbVelocity;
+
         void Awake()
         {
-            _ipAddress = IpPresets[0];
+            _ipAddress = IpPresets[0].ip;
 
             // Setup XR interaction (ray interactors on controllers)
             gameObject.AddComponent<XRInteractionSetup>();
@@ -160,10 +180,14 @@ namespace SemanticXR.UI
             Mk.Label(_connectPanel.transform, "SemanticXR", new Vector2(0, 160), 32, Color.white);
 
             Mk.Label(_connectPanel.transform, "Server IP", new Vector2(0, 115), 16, new Color(0.6f, 0.6f, 0.65f));
-            Mk.Btn(_connectPanel.transform, "<", new Vector2(-150, 85), new Vector2(36, 30), new Color(0.3f, 0.3f, 0.4f), 20, () => ChangeIp(-1));
-            _ipLabel = Mk.Label(_connectPanel.transform, _ipAddress, new Vector2(0, 85), 20, Color.white);
-            Mk.Btn(_connectPanel.transform, ">", new Vector2(150, 85), new Vector2(36, 30), new Color(0.3f, 0.3f, 0.4f), 20, () => ChangeIp(1));
-            Mk.Btn(_connectPanel.transform, "Custom", new Vector2(230, 85), new Vector2(80, 30), new Color(0.3f, 0.3f, 0.4f), 14, () => OpenKB("ip"));
+            var ipNames = new string[IpPresets.Length];
+            var ipAddrs = new string[IpPresets.Length];
+            for (int i = 0; i < IpPresets.Length; i++) { ipNames[i] = IpPresets[i].name; ipAddrs[i] = IpPresets[i].ip; }
+            _ipDropdown = Mk.Dropdown(_connectPanel.transform, new Vector2(-40, 85), new Vector2(260, 36),
+                ipNames, _ipIndex,
+                i => { _ipIndex = i; _ipAddress = ipAddrs[i]; },
+                itemHeight: 34f, secondaries: ipAddrs);
+            Mk.Btn(_connectPanel.transform, "Custom", new Vector2(150, 85), new Vector2(80, 30), new Color(0.3f, 0.3f, 0.4f), 14, () => OpenKB("ip"));
 
             // Two ports side-by-side: frames (raw TCP or gRPC) and audio (gRPC VisualizerServer).
             Mk.Label(_connectPanel.transform, "Frames Port", new Vector2(-115, 50), 16, new Color(0.6f, 0.6f, 0.65f));
@@ -175,9 +199,12 @@ namespace SemanticXR.UI
             Mk.Btn(_connectPanel.transform, "", new Vector2(115, 22), new Vector2(200, 30), new Color(0.2f, 0.2f, 0.25f, 0.5f), 0, () => OpenKB("audioPort"));
 
             Mk.Label(_connectPanel.transform, "FPS", new Vector2(-220, -15), 16, new Color(0.6f, 0.6f, 0.65f), TextAlignmentOptions.MidlineRight, 160);
-            Mk.Btn(_connectPanel.transform, "<", new Vector2(-110, -15), new Vector2(36, 30), new Color(0.3f, 0.3f, 0.4f), 20, () => ChangeFps(-1));
-            _fpsLabel = Mk.Label(_connectPanel.transform, _selectedFps.ToString(), new Vector2(-60, -15), 20, Color.white);
-            Mk.Btn(_connectPanel.transform, ">", new Vector2(-10, -15), new Vector2(36, 30), new Color(0.3f, 0.3f, 0.4f), 20, () => ChangeFps(1));
+            var fpsStrings = new string[FpsOptions.Length];
+            for (int i = 0; i < FpsOptions.Length; i++) fpsStrings[i] = FpsOptions[i].ToString();
+            _fpsDropdown = Mk.Dropdown(_connectPanel.transform, new Vector2(-40, -15), new Vector2(140, 30),
+                fpsStrings, _fpsIndex,
+                i => { _fpsIndex = i; _selectedFps = FpsOptions[i]; },
+                openUpward: true, itemHeight: 22f, itemFontSize: 15f, arrowRightMargin: 18f);
 
             Mk.Label(_connectPanel.transform, "Transport", new Vector2(115, -15), 14, new Color(0.6f, 0.6f, 0.65f), TextAlignmentOptions.MidlineRight, 100);
             _transportBtn = Mk.Btn(_connectPanel.transform, _orchestrator.Transport.ToString(),
@@ -220,45 +247,94 @@ namespace SemanticXR.UI
             dtR.sizeDelta = new Vector2(500, 90);
             _dictationText.textWrappingMode = TextWrappingModes.Normal;
 
-            _micBtn = Mk.Btn(_streamingPanel.transform, "", new Vector2(0, -75),
-                new Vector2(90, 90), MicIdleColor, 0, OnMicClicked);
-            _micBtnBg = _micBtn.GetComponent<Image>();
-            // Procedurally generated circular disc — no dependency on built-in sprites.
-            _micBtnBg.sprite = IconFactory.Circle;
-            _micBtnBg.type   = Image.Type.Simple;
+            // Mic + Clear + Disconnect all live on a body-locked orb (see BuildMicOrb).
+            _streamingPanel.SetActive(false);
 
-            _micIconGroup  = IconFactory.MakeIconChild(_micBtn.transform, "MicIcon",  IconFactory.Mic);
+            BuildMicOrb();
+        }
+
+        void BuildMicOrb()
+        {
+            _micOrb = new GameObject("MicOrb");
+            _micOrb.transform.SetParent(transform, worldPositionStays: true);
+            var canvas = _micOrb.AddComponent<Canvas>();
+            canvas.renderMode = RenderMode.WorldSpace;
+            _micOrb.AddComponent<CanvasScaler>().dynamicPixelsPerUnit = 10f;
+            _micOrb.AddComponent<TrackedDeviceGraphicRaycaster>();
+
+            var r = canvas.GetComponent<RectTransform>();
+            r.sizeDelta = new Vector2(340, 100);
+            r.localScale = Vector3.one * 0.001f;
+
+            var clearColor      = new Color(0.25f, 0.35f, 0.5f);
+            var disconnectColor = new Color(0.6f, 0.15f, 0.15f);
+
+            _clearBtn = MakeOrbButton(_micOrb.transform, new Vector2(-115, 0),
+                clearColor, IconFactory.Trash, ClearPoints);
+
+            _micBtn = MakeOrbButton(_micOrb.transform, Vector2.zero,
+                MicIdleColor, IconFactory.Mic, OnMicClicked);
+            _micBtnBg = _micBtn.GetComponent<Image>();
+            // Stop icon overlays the mic icon on the same button, toggled by listening state.
+            _micIconGroup  = _micBtn.transform.Find("Icon").gameObject;
             _stopIconGroup = IconFactory.MakeIconChild(_micBtn.transform, "StopIcon", IconFactory.Stop);
             _stopIconGroup.SetActive(false);
 
-            // Diagnostic: log raw pointer events on the button so we can tell
-            // whether taps are even reaching the GameObject independent of the
-            // Button component's onClick path.
             var trig = _micBtn.gameObject.AddComponent<EventTrigger>();
-            AddTrigger(trig, EventTriggerType.PointerEnter, () => Debug.Log("[StreamingUI] pointer ENTER mic"));
-            AddTrigger(trig, EventTriggerType.PointerDown,  () => Debug.Log("[StreamingUI] pointer DOWN mic"));
-            AddTrigger(trig, EventTriggerType.PointerUp,    () => Debug.Log("[StreamingUI] pointer UP mic"));
-            AddTrigger(trig, EventTriggerType.PointerClick, () => Debug.Log("[StreamingUI] pointer CLICK mic"));
+            AddTrigger(trig, EventTriggerType.PointerEnter, () => Debug.Log("[StreamingUI] pointer ENTER mic orb"));
+            AddTrigger(trig, EventTriggerType.PointerDown,  () => Debug.Log("[StreamingUI] pointer DOWN mic orb"));
+            AddTrigger(trig, EventTriggerType.PointerUp,    () => Debug.Log("[StreamingUI] pointer UP mic orb"));
+            AddTrigger(trig, EventTriggerType.PointerClick, () => Debug.Log("[StreamingUI] pointer CLICK mic orb"));
 
-            _clearBtn = Mk.Btn(_streamingPanel.transform, "Clear Points",
-                new Vector2(-160, -140), new Vector2(140, 40),
-                new Color(0.25f, 0.35f, 0.5f), 18, ClearPoints);
-            Mk.Btn(_streamingPanel.transform, "Disconnect", new Vector2(80, -140), new Vector2(200, 45), new Color(0.6f, 0.15f, 0.15f), 22, () => _orchestrator.Disconnect());
-            _streamingPanel.SetActive(false);
+            MakeOrbButton(_micOrb.transform, new Vector2(115, 0),
+                disconnectColor, IconFactory.Power, () => _orchestrator.Disconnect());
+
+            _micOrb.SetActive(false);
         }
 
-        void ChangeIp(int d)
+        static Button MakeOrbButton(Transform parent, Vector2 pos, Color bg, Sprite icon, UnityEngine.Events.UnityAction onClick)
         {
-            _ipIndex = (_ipIndex + d + IpPresets.Length) % IpPresets.Length;
-            _ipAddress = IpPresets[_ipIndex];
-            _ipLabel.text = _ipAddress;
+            var btn = Mk.Btn(parent, "", pos, new Vector2(85, 85), bg, 0, onClick);
+            var img = btn.GetComponent<Image>();
+            img.sprite = IconFactory.Circle;
+            img.type   = Image.Type.Simple;
+            IconFactory.MakeIconChild(btn.transform, "Icon", icon);
+            return btn;
         }
-        void ChangeFps(int d)
+
+        void InitMicOrbPose()
         {
-            _fpsIndex = Mathf.Clamp(_fpsIndex + d, 0, FpsOptions.Length - 1);
-            _selectedFps = FpsOptions[_fpsIndex];
-            _fpsLabel.text = _selectedFps.ToString();
+            var cam = Camera.main;
+            if (cam == null || _micOrb == null) return;
+            var fwd = cam.transform.forward; fwd.y = 0;
+            if (fwd.sqrMagnitude < 0.001f) fwd = Vector3.forward;
+            _orbBodyForward = fwd.normalized;
+            _orbVelocity = Vector3.zero;
+            var p = cam.transform.position + _orbBodyForward * micOrbDistance;
+            p.y = cam.transform.position.y + micOrbVerticalOffset;
+            _micOrb.transform.position = p;
+            _micOrb.transform.rotation = Quaternion.LookRotation(p - cam.transform.position);
         }
+
+        void UpdateMicOrbPose()
+        {
+            var cam = Camera.main;
+            if (cam == null) return;
+            var headFwd = cam.transform.forward; headFwd.y = 0;
+            if (headFwd.sqrMagnitude < 0.001f) return;
+            headFwd.Normalize();
+
+            float t = 1f - Mathf.Exp(-Time.deltaTime / Mathf.Max(0.01f, micOrbYawSmoothTime));
+            _orbBodyForward = Vector3.Slerp(_orbBodyForward, headFwd, t).normalized;
+
+            var target = cam.transform.position + _orbBodyForward * micOrbDistance;
+            target.y = cam.transform.position.y + micOrbVerticalOffset;
+            _micOrb.transform.position = Vector3.SmoothDamp(
+                _micOrb.transform.position, target, ref _orbVelocity, micOrbPosSmoothTime);
+            _micOrb.transform.rotation = Quaternion.LookRotation(
+                _micOrb.transform.position - cam.transform.position);
+        }
+
         void ToggleTransport()
         {
             _orchestrator.Transport = _orchestrator.Transport == FramesTransport.Tcp
@@ -302,6 +378,7 @@ namespace SemanticXR.UI
             _errorText.text = "";
             _connectPanel.SetActive(true);
             _streamingPanel.SetActive(false);
+            if (_micOrb != null) _micOrb.SetActive(false);
             Position();
         }
 
@@ -327,6 +404,7 @@ namespace SemanticXR.UI
             if (_audio != null && int.TryParse(_audioPortString, out int audioPort))
                 _audio.Configure(_ipAddress, audioPort);
             Position();
+            if (_micOrb != null) { _micOrb.SetActive(true); InitMicOrbPose(); }
         }
         void ShowError(string msg) { _errorText.text = msg; _connectBtn.interactable = true; }
 
@@ -407,6 +485,8 @@ namespace SemanticXR.UI
         {
             if (!_positioned && Camera.main != null) { Position(); _positioned = true; }
 
+            if (_micOrb != null && _micOrb.activeSelf) UpdateMicOrbPose();
+
             if (_keyboard != null)
             {
                 if (_keyboard.status == TouchScreenKeyboard.Status.Visible ||
@@ -414,7 +494,7 @@ namespace SemanticXR.UI
                 {
                     switch (_editField)
                     {
-                        case "ip":        _ipAddress       = _keyboard.text; _ipLabel.text        = _ipAddress;       break;
+                        case "ip":        _ipAddress       = _keyboard.text; _ipDropdown.label.text = "Custom"; if (_ipDropdown.subLabel != null) _ipDropdown.subLabel.text = _ipAddress; break;
                         case "audioPort": _audioPortString = _keyboard.text; _audioPortLabel.text = _audioPortString; break;
                         default:          _portString      = _keyboard.text; _portLabel.text      = _portString;      break;
                     }
@@ -480,6 +560,22 @@ namespace SemanticXR.UI
             return t;
         }
 
+        // Half-height text child. topHalf=true: anchored to upper half; false: lower half.
+        // Used for two-line dropdown items (name on top, IP as subscript below).
+        public static TextMeshProUGUI MakeStackedText(Transform parent, string name, string text,
+            float fontSize, Color color, bool topHalf)
+        {
+            var go = new GameObject(name); go.transform.SetParent(parent, false);
+            var r = go.AddComponent<RectTransform>();
+            r.anchorMin = topHalf ? new Vector2(0, 0.5f) : new Vector2(0, 0);
+            r.anchorMax = topHalf ? new Vector2(1, 1)    : new Vector2(1, 0.5f);
+            r.offsetMin = Vector2.zero; r.offsetMax = Vector2.zero;
+            var t = go.AddComponent<TextMeshProUGUI>();
+            t.text = text; t.fontSize = fontSize; t.color = color;
+            t.alignment = TextAlignmentOptions.Center; t.raycastTarget = false;
+            return t;
+        }
+
         public static Button Btn(Transform p, string label, Vector2 pos, Vector2 size, Color bg, float fontSize, UnityEngine.Events.UnityAction click)
         {
             var go = new GameObject("B_" + label); go.transform.SetParent(p, false);
@@ -497,8 +593,136 @@ namespace SemanticXR.UI
                 t.text = label; t.fontSize = fontSize; t.alignment = TextAlignmentOptions.Center; t.color = Color.white;
                 t.raycastTarget = false;
             }
-            btn.onClick.AddListener(click);
+            if (click != null) btn.onClick.AddListener(click);
             return btn;
+        }
+
+        // Tracks the currently-open dropdown so opening another one auto-closes it.
+        static DropdownHandle _openDropdown;
+
+        public class DropdownHandle
+        {
+            public Button display;
+            public GameObject panel;
+            public GameObject scrim;
+            public TextMeshProUGUI label;    // primary / main text
+            public TextMeshProUGUI subLabel; // secondary (subscript) text; null for single-line dropdowns
+            public int selectedIndex;
+
+            public void Close()
+            {
+                if (panel != null) panel.SetActive(false);
+                if (scrim != null) scrim.SetActive(false);
+                if (_openDropdown == this) _openDropdown = null;
+            }
+
+            public void Open()
+            {
+                if (_openDropdown != null && _openDropdown != this) _openDropdown.Close();
+                _openDropdown = this;
+                scrim.SetActive(true);
+                scrim.transform.SetAsLastSibling();
+                panel.SetActive(true);
+                panel.transform.SetAsLastSibling();
+            }
+        }
+
+        // Custom WorldSpace dropdown. TMP_Dropdown's built-in template is painful
+        // to construct programmatically, and XR-friendly behavior is simpler when
+        // options live as regular Buttons on a child panel.
+        public static DropdownHandle Dropdown(Transform parent, Vector2 pos, Vector2 size,
+            string[] options, int initialIdx, System.Action<int> onChange,
+            bool openUpward = false, float itemHeight = 28f, float itemFontSize = 16f,
+            float arrowRightMargin = 10f,
+            string[] secondaries = null)
+        {
+            var h = new DropdownHandle { selectedIndex = initialIdx };
+            var bg = new Color(0.3f, 0.3f, 0.4f);
+            var subColor = new Color(0.65f, 0.65f, 0.72f);
+
+            if (secondaries != null)
+            {
+                // Two-line display: name primary (top), IP subscript (bottom).
+                h.display = Btn(parent, "", pos, size, bg, 0, null);
+                h.label    = MakeStackedText(h.display.transform, "Primary",   options[initialIdx],     14f, Color.white, topHalf: true);
+                h.subLabel = MakeStackedText(h.display.transform, "Secondary", secondaries[initialIdx], 10f, subColor,    topHalf: false);
+            }
+            else
+            {
+                h.display = Btn(parent, options[initialIdx], pos, size, bg, 18, null);
+                h.label = h.display.GetComponentInChildren<TextMeshProUGUI>();
+            }
+
+            // Triangle arrow anchored to the right edge of the display button.
+            // Rotated 180° for upward-opening dropdowns so it points the open direction.
+            var arrowGo = new GameObject("Arrow");
+            arrowGo.transform.SetParent(h.display.transform, false);
+            var ar = arrowGo.AddComponent<RectTransform>();
+            ar.anchorMin = ar.anchorMax = new Vector2(1f, 0.5f);
+            ar.pivot = new Vector2(1f, 0.5f);
+            ar.anchoredPosition = new Vector2(-arrowRightMargin, 0f);
+            ar.sizeDelta = new Vector2(18f, 13f);
+            var arrowImg = arrowGo.AddComponent<Image>();
+            arrowImg.sprite = IconFactory.TriDown;
+            arrowImg.color = Color.white;
+            arrowImg.raycastTarget = false;
+            if (openUpward) arrowGo.transform.localRotation = Quaternion.Euler(0, 0, 180f);
+
+            // Invisible full-stretch click-catcher. Any tap outside the options panel
+            // (including on other dropdowns' displays) hits this first and closes us.
+            h.scrim = new GameObject("DD_Scrim");
+            h.scrim.transform.SetParent(parent, false);
+            var sr = h.scrim.AddComponent<RectTransform>();
+            sr.anchorMin = Vector2.zero; sr.anchorMax = Vector2.one;
+            sr.offsetMin = Vector2.zero; sr.offsetMax = Vector2.zero;
+            var sImg = h.scrim.AddComponent<Image>();
+            sImg.color = new Color(1, 1, 1, 0f);
+            var sBtn = h.scrim.AddComponent<Button>();
+            sBtn.transition = Selectable.Transition.None;
+            sBtn.targetGraphic = sImg;
+            sBtn.onClick.AddListener(h.Close);
+            h.scrim.SetActive(false);
+
+            float panelHeight = options.Length * itemHeight;
+            h.panel = Panel(parent, "DD_Options", new Color(0.1f, 0.1f, 0.15f, 0.98f));
+            var pR = h.panel.GetComponent<RectTransform>();
+            float dir = openUpward ? 1f : -1f;
+            pR.anchoredPosition = new Vector2(pos.x, pos.y + dir * (size.y / 2f + panelHeight / 2f));
+            pR.sizeDelta = new Vector2(size.x, panelHeight);
+
+            for (int i = 0; i < options.Length; i++)
+            {
+                int idx = i;
+                float yOff = (options.Length - 1) * itemHeight / 2f - i * itemHeight;
+                UnityEngine.Events.UnityAction onPick = () =>
+                {
+                    h.selectedIndex = idx;
+                    h.label.text = options[idx];
+                    if (h.subLabel != null && secondaries != null) h.subLabel.text = secondaries[idx];
+                    onChange?.Invoke(idx);
+                    h.Close();
+                };
+                var itemSize = new Vector2(size.x - 4, itemHeight - 2);
+                var itemBg = new Color(0.2f, 0.2f, 0.3f);
+                if (secondaries != null)
+                {
+                    var ib = Btn(h.panel.transform, "", new Vector2(0, yOff), itemSize, itemBg, 0, onPick);
+                    MakeStackedText(ib.transform, "Primary",   options[i],     itemFontSize,          Color.white, topHalf: true);
+                    MakeStackedText(ib.transform, "Secondary", secondaries[i], itemFontSize * 0.72f,  subColor,    topHalf: false);
+                }
+                else
+                {
+                    Btn(h.panel.transform, options[i], new Vector2(0, yOff), itemSize, itemBg, itemFontSize, onPick);
+                }
+            }
+            h.panel.SetActive(false);
+
+            h.display.onClick.AddListener(() =>
+            {
+                if (h.panel.activeSelf) h.Close();
+                else h.Open();
+            });
+            return h;
         }
     }
 
@@ -507,11 +731,14 @@ namespace SemanticXR.UI
     // Textures are 128x128 RGBA, cached as static singletons.
     static class IconFactory
     {
-        static Sprite _mic, _stop, _circle;
+        static Sprite _mic, _stop, _circle, _trash, _power, _triDown;
 
-        public static Sprite Mic    => _mic    ??= BuildMic();
-        public static Sprite Stop   => _stop   ??= BuildStop();
-        public static Sprite Circle => _circle ??= BuildCircle();
+        public static Sprite Mic     => _mic     ??= BuildMic();
+        public static Sprite Stop    => _stop    ??= BuildStop();
+        public static Sprite Circle  => _circle  ??= BuildCircle();
+        public static Sprite Trash   => _trash   ??= BuildTrash();
+        public static Sprite Power   => _power   ??= BuildPower();
+        public static Sprite TriDown => _triDown ??= BuildTriDown();
 
         const int Size = 128;
 
@@ -554,6 +781,36 @@ namespace SemanticXR.UI
             return MakeSprite(px);
         }
 
+        static Sprite BuildTrash()
+        {
+            var px = ClearBuffer();
+            // Body (bucket).
+            FillRoundedRect(px, 40, 26, 48, 58, 5, Color.white);
+            // Lid (horizontal bar above body, with a small gap).
+            FillRoundedRect(px, 34, 88, 60, 7, 3, Color.white);
+            // Handle on top of lid.
+            FillRoundedRect(px, 54, 95, 20, 6, 2, Color.white);
+            return MakeSprite(px);
+        }
+
+        static Sprite BuildPower()
+        {
+            var px = ClearBuffer();
+            // Broken ring (opening at top) + vertical bar through the opening.
+            FillRingWithTopGap(px, 64, 58, 38, 30, 22f, Color.white);
+            FillRoundedRect(px, 62, 56, 4, 42, 2, Color.white);
+            return MakeSprite(px);
+        }
+
+        static Sprite BuildTriDown()
+        {
+            var px = ClearBuffer();
+            // Apex at (64, 38) pointing down, base from (34, 84) to (94, 84).
+            // Image rect displays texture with y=0 at bottom, so apex appears at bottom.
+            FillTriDown(px, 64, 38, 84, 30, Color.white);
+            return MakeSprite(px);
+        }
+
         static Color32[] ClearBuffer()
         {
             var px = new Color32[Size * Size];
@@ -582,6 +839,80 @@ namespace SemanticXR.UI
                     float d  = Mathf.Sqrt(dx * dx + dy * dy) - r;
                     float a  = Mathf.Clamp01(0.5f - d);
                     if (a <= 0) continue;
+                    int idx = y * Size + x;
+                    byte newA = (byte)Mathf.RoundToInt(color.a * a * 255f);
+                    if (newA > px[idx].a)
+                        px[idx] = new Color32(
+                            (byte)Mathf.RoundToInt(color.r * 255f),
+                            (byte)Mathf.RoundToInt(color.g * 255f),
+                            (byte)Mathf.RoundToInt(color.b * 255f),
+                            newA);
+                }
+            }
+        }
+
+        // Down-pointing isoceles triangle with apex at (cx, yBot) and base running
+        // from (cx - halfWidth, yTop) to (cx + halfWidth, yTop). yBot < yTop; on a
+        // bottom-left-origin texture the apex ends up at the bottom of the image.
+        static void FillTriDown(Color32[] px, float cx, float yBot, float yTop, float halfWidth, Color color)
+        {
+            int xmin = Mathf.Max(0, Mathf.FloorToInt(cx - halfWidth - 1));
+            int xmax = Mathf.Min(Size - 1, Mathf.CeilToInt(cx + halfWidth + 1));
+            int ymin = Mathf.Max(0, Mathf.FloorToInt(yBot - 1));
+            int ymax = Mathf.Min(Size - 1, Mathf.CeilToInt(yTop + 1));
+            float h = yTop - yBot;
+            if (h <= 0) return;
+
+            for (int y = ymin; y <= ymax; y++)
+            {
+                float pyF = y + 0.5f;
+                float t = Mathf.Clamp01((pyF - yBot) / h);
+                float halfW = halfWidth * t;
+                float xL = cx - halfW, xR = cx + halfW;
+                float ayBot = Mathf.Clamp01(0.5f + pyF - yBot);
+                float ayTop = Mathf.Clamp01(0.5f + yTop - pyF);
+                for (int x = xmin; x <= xmax; x++)
+                {
+                    float pxF = x + 0.5f;
+                    float axL = Mathf.Clamp01(0.5f + pxF - xL);
+                    float axR = Mathf.Clamp01(0.5f + xR - pxF);
+                    float a = ayBot * ayTop * axL * axR;
+                    if (a <= 0) continue;
+                    int idx = y * Size + x;
+                    byte newA = (byte)Mathf.RoundToInt(color.a * a * 255f);
+                    if (newA > px[idx].a)
+                        px[idx] = new Color32(
+                            (byte)Mathf.RoundToInt(color.r * 255f),
+                            (byte)Mathf.RoundToInt(color.g * 255f),
+                            (byte)Mathf.RoundToInt(color.b * 255f),
+                            newA);
+                }
+            }
+        }
+
+        // Annulus (ring) with a wedge removed at the top. halfGapDeg = half-angle
+        // of the gap measured from +y axis. Used for the power-button icon.
+        static void FillRingWithTopGap(Color32[] px, float cx, float cy, float rOuter, float rInner, float halfGapDeg, Color color)
+        {
+            int xmin = Mathf.Max(0, Mathf.FloorToInt(cx - rOuter - 1));
+            int xmax = Mathf.Min(Size - 1, Mathf.CeilToInt(cx + rOuter + 1));
+            int ymin = Mathf.Max(0, Mathf.FloorToInt(cy - rOuter - 1));
+            int ymax = Mathf.Min(Size - 1, Mathf.CeilToInt(cy + rOuter + 1));
+            float gapRad = halfGapDeg * Mathf.Deg2Rad;
+
+            for (int y = ymin; y <= ymax; y++)
+            {
+                for (int x = xmin; x <= xmax; x++)
+                {
+                    float pxF = x + 0.5f, pyF = y + 0.5f;
+                    float dx = pxF - cx, dy = pyF - cy;
+                    float d = Mathf.Sqrt(dx * dx + dy * dy);
+                    // Distance-from-annulus (negative inside the ring, 0 on either edge).
+                    float dRing = Mathf.Max(d - rOuter, rInner - d);
+                    float a = Mathf.Clamp01(0.5f - dRing);
+                    if (a <= 0) continue;
+                    // Skip the wedge at the top.
+                    if (dy > 0 && Mathf.Atan2(Mathf.Abs(dx), dy) < gapRad) continue;
                     int idx = y * Size + x;
                     byte newA = (byte)Mathf.RoundToInt(color.a * a * 255f);
                     if (newA > px[idx].a)
