@@ -253,12 +253,12 @@ namespace SemanticXR.UI
             Mk.Stretch(_streamingPanel, 20);
 
             // Dynamic title doubles as status: "Streaming to <name>" / "Connecting to <name>..."
-            _statusText = Mk.Label(_streamingPanel.transform, "", new Vector2(0, 70), 18, new Color(0.3f, 0.9f, 0.4f));
+            _statusText = Mk.Label(_streamingPanel.transform, "", new Vector2(0, 55), 18, new Color(0.3f, 0.9f, 0.4f));
 
             // Compact stats line on second row, centered under the title.
             // Format: "Sent N · Q M · Drops K · X FPS · Upstream Y Mbps". Color goes orange on drops.
             _statsText = Mk.Label(_streamingPanel.transform, "",
-                new Vector2(0, 40), 13, new Color(0.55f, 0.55f, 0.6f),
+                new Vector2(0, 25), 13, new Color(0.55f, 0.55f, 0.6f),
                 TextAlignmentOptions.Center, 500);
             _statsText.GetComponent<RectTransform>().sizeDelta = new Vector2(500, 22);
 
@@ -266,14 +266,14 @@ namespace SemanticXR.UI
                 new Color(0.12f, 0.12f, 0.18f, 0.9f));
             var tbR = textBoxBg.GetComponent<RectTransform>();
             tbR.anchoredPosition = new Vector2(0, -30);
-            tbR.sizeDelta = new Vector2(520, 100);
+            tbR.sizeDelta = new Vector2(520, 70);
             textBoxBg.GetComponent<Image>().raycastTarget = false;
 
             _dictationText = Mk.Label(textBoxBg.transform, "",
                 Vector2.zero, 16, new Color(0.92f, 0.92f, 0.95f),
                 TextAlignmentOptions.TopLeft, 500);
             var dtR = _dictationText.GetComponent<RectTransform>();
-            dtR.sizeDelta = new Vector2(500, 90);
+            dtR.sizeDelta = new Vector2(500, 60);
             _dictationText.textWrappingMode = TextWrappingModes.Normal;
 
             // Mic + Clear + Disconnect all live on a body-locked orb (see BuildMicOrb).
@@ -422,7 +422,7 @@ namespace SemanticXR.UI
         {
             _connectPanel.SetActive(false);
             _streamingPanel.SetActive(true);
-            _canvasRect.sizeDelta = new Vector2(530, 170);
+            _canvasRect.sizeDelta = new Vector2(530, 140);
             System.Array.Clear(_bwSnapshots, 0, _bwSnapshots.Length);
             _bwIdx = 0;
             _bwNextSampleTime = Time.unscaledTime + 1f;
