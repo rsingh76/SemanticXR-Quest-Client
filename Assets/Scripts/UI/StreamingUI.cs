@@ -165,6 +165,15 @@ namespace SemanticXR.UI
             _canvas.transform.rotation = Quaternion.LookRotation(pos - cam.transform.position);
         }
 
+        // Resolve the current IP back to a preset name, or fall back to the raw IP
+        // for custom entries. Used for the "Streaming to X" status line.
+        string CurrentServerName()
+        {
+            for (int i = 0; i < IpPresets.Length; i++)
+                if (IpPresets[i].ip == _ipAddress) return IpPresets[i].name;
+            return _ipAddress;
+        }
+
         // Press A on the right controller to snap panel + mic orb back in front of the user.
         // Does not touch the tracking origin — we just reposition our own world-space GameObjects.
         void TryHandleRecallButton()
@@ -242,26 +251,21 @@ namespace SemanticXR.UI
 
             _streamingPanel = Mk.Panel(bg.transform, "Streaming", Color.clear);
             Mk.Stretch(_streamingPanel, 20);
-            Mk.Label(_streamingPanel.transform, "Streaming", new Vector2(0, 155), 26, new Color(0.3f, 0.9f, 0.4f));
-            _statusText = Mk.Label(_streamingPanel.transform, "", new Vector2(0, 120), 16, Color.white);
 
-            // Compact stats line in the top-right corner. Center is intentionally
-            // left empty for new feature UI (e.g. add-voice-query).
+            // Dynamic title doubles as status: "Streaming to <name>" / "Connecting to <name>..."
+            _statusText = Mk.Label(_streamingPanel.transform, "", new Vector2(0, 70), 18, new Color(0.3f, 0.9f, 0.4f));
+
+            // Compact stats line on second row, centered under the title.
             // Format: "Sent N · Q M · Drops K · X FPS · Upstream Y Mbps". Color goes orange on drops.
-            // Rect is right-anchored: width grows leftward from x=150 (the old right edge).
             _statsText = Mk.Label(_streamingPanel.transform, "",
-                new Vector2(-100, 175), 13, new Color(0.55f, 0.55f, 0.6f),
-                TextAlignmentOptions.TopRight, 500);
+                new Vector2(0, 40), 13, new Color(0.55f, 0.55f, 0.6f),
+                TextAlignmentOptions.Center, 500);
             _statsText.GetComponent<RectTransform>().sizeDelta = new Vector2(500, 22);
-
-            // Voice dictation: text box above a mic/stop toggle button.
-            Mk.Label(_streamingPanel.transform, "Speak to SemanticXR", new Vector2(0, 85), 14,
-                new Color(0.6f, 0.6f, 0.65f));
 
             var textBoxBg = Mk.Panel(_streamingPanel.transform, "DictationBox",
                 new Color(0.12f, 0.12f, 0.18f, 0.9f));
             var tbR = textBoxBg.GetComponent<RectTransform>();
-            tbR.anchoredPosition = new Vector2(0, 25);
+            tbR.anchoredPosition = new Vector2(0, -30);
             tbR.sizeDelta = new Vector2(520, 100);
             textBoxBg.GetComponent<Image>().raycastTarget = false;
 
@@ -418,7 +422,7 @@ namespace SemanticXR.UI
         {
             _connectPanel.SetActive(false);
             _streamingPanel.SetActive(true);
-            _canvasRect.sizeDelta = new Vector2(650, 420);
+            _canvasRect.sizeDelta = new Vector2(530, 170);
             System.Array.Clear(_bwSnapshots, 0, _bwSnapshots.Length);
             _bwIdx = 0;
             _bwNextSampleTime = Time.unscaledTime + 1f;
@@ -535,8 +539,8 @@ namespace SemanticXR.UI
                 var err = _orchestrator.LastError;
                 if (!string.IsNullOrEmpty(err)) { _orchestrator.Disconnect(); ShowConnect(); ShowError(err); return; }
                 _statusText.text = _orchestrator.IsConnected
-                    ? $"Connected to {_orchestrator.ServerTarget}"
-                    : $"Connecting to {_orchestrator.ServerTarget}...";
+                    ? $"Streaming to {CurrentServerName()}"
+                    : $"Connecting to {CurrentServerName()}...";
 
                 // Compact stats line: Sent · Q · Drops · FPS · Upstream  (color-coded on drops).
                 int totalDropped = _orchestrator.TotalDropped;
