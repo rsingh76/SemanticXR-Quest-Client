@@ -15,6 +15,22 @@ namespace SemanticXR.UI
         [SerializeField] float distanceFromCamera = 1.2f;
         [SerializeField] float verticalOffset = -0.1f;
 
+        [Header("Body-Locked UI (shared: panel + mic orb)")]
+        [SerializeField] float bodyPosSmoothTime = 0.3f;
+        // Larger = slower yaw catch-up. Head twists don't drag the UI; body turns do.
+        [SerializeField] float bodyYawSmoothTime = 1.2f;
+
+        [Header("Streaming Panel Placement (below orb row)")]
+        [SerializeField] float streamingPanelDistance = 1.0f;
+        // Placed so the panel top sits ~4° below the orb-row bottom at default orb offsets.
+        [SerializeField] float streamingPanelVerticalOffset = -0.9f;
+
+        // Single body-forward vector shared by the panel and the orb so they
+        // always yaw together. Each widget keeps its own position velocity
+        // because they sit at different distances/heights.
+        Vector3 _bodyForward = Vector3.forward;
+        Vector3 _panelVelocity;
+
         StreamingOrchestrator _orchestrator;
         Canvas _canvas;
         RectTransform _canvasRect;
@@ -53,7 +69,7 @@ namespace SemanticXR.UI
         TextMeshProUGUI _transportLabel;
 
         Button _connectBtn;
-        TextMeshProUGUI _errorText, _statusText, _statsText;
+        TextMeshProUGUI _errorText, _statusText;
 
         AudioStreamController _audio;
         PointCloudVisualizer  _visualizer;
@@ -79,15 +95,11 @@ namespace SemanticXR.UI
         bool _positioned;
         bool _recallWasDown;
 
-        [Header("Mic Orb (Body-Locked)")]
+        [Header("Mic Orb Position")]
         [SerializeField] float micOrbDistance = 0.55f;
         [SerializeField] float micOrbVerticalOffset = -0.35f;
-        [SerializeField] float micOrbPosSmoothTime = 0.3f;
-        // Larger = slower yaw catch-up. Head twists don't drag the orb; body turns do.
-        [SerializeField] float micOrbYawSmoothTime = 1.2f;
 
         GameObject _micOrb;
-        Vector3 _orbBodyForward = Vector3.forward;
         Vector3 _orbVelocity;
 
         void Awake()
@@ -165,6 +177,62 @@ namespace SemanticXR.UI
             _canvas.transform.rotation = Quaternion.LookRotation(pos - cam.transform.position);
         }
 
+        // Snap the shared body-forward to the current head flat-forward.
+        // Called by InitStreamingPanelPose / InitMicOrbPose on ShowStreaming
+        // and A-button recall so panel and orb restart perfectly in sync.
+        void SnapSharedBodyForward()
+        {
+            var cam = Camera.main;
+            if (cam == null) return;
+            var fwd = cam.transform.forward; fwd.y = 0;
+            if (fwd.sqrMagnitude < 0.001f) fwd = Vector3.forward;
+            _bodyForward = fwd.normalized;
+        }
+
+        // Slowly catch body-forward up to head flat-forward. Runs once per frame
+        // in Update so both panel and orb see the same updated vector.
+        void UpdateSharedBodyForward()
+        {
+            var cam = Camera.main;
+            if (cam == null) return;
+            var headFwd = cam.transform.forward; headFwd.y = 0;
+            if (headFwd.sqrMagnitude < 0.001f) return;
+            headFwd.Normalize();
+            float t = 1f - Mathf.Exp(-Time.deltaTime / Mathf.Max(0.01f, bodyYawSmoothTime));
+            _bodyForward = Vector3.Slerp(_bodyForward, headFwd, t).normalized;
+        }
+
+        // Snap the streaming panel to below-the-orbs. Uses streaming-specific
+        // distance/vertical so the panel sits visually underneath the orb row,
+        // not at eye level like the Connect panel. Shares body-forward with
+        // the orb so the pair yaws together.
+        void InitStreamingPanelPose()
+        {
+            var cam = Camera.main;
+            if (cam == null || _canvas == null) return;
+            SnapSharedBodyForward();
+            _panelVelocity = Vector3.zero;
+            var p = cam.transform.position + _bodyForward * streamingPanelDistance;
+            p.y = cam.transform.position.y + streamingPanelVerticalOffset;
+            _canvas.transform.position = p;
+            _canvas.transform.rotation = Quaternion.LookRotation(p - cam.transform.position);
+        }
+
+        // Body-lock update for the streaming panel. Reads the shared body-forward
+        // (already yaw-stepped this frame by UpdateSharedBodyForward) and damps
+        // the canvas position toward its body-locked target below the orb row.
+        void UpdateStreamingPanelPose()
+        {
+            var cam = Camera.main;
+            if (cam == null) return;
+            var target = cam.transform.position + _bodyForward * streamingPanelDistance;
+            target.y = cam.transform.position.y + streamingPanelVerticalOffset;
+            _canvas.transform.position = Vector3.SmoothDamp(
+                _canvas.transform.position, target, ref _panelVelocity, bodyPosSmoothTime);
+            _canvas.transform.rotation = Quaternion.LookRotation(
+                _canvas.transform.position - cam.transform.position);
+        }
+
         // Resolve the current IP back to a preset name, or fall back to the raw IP
         // for custom entries. Used for the "Streaming to X" status line.
         string CurrentServerName()
@@ -183,7 +251,8 @@ namespace SemanticXR.UI
             if (!rh.TryGetFeatureValue(CommonUsages.primaryButton, out bool down)) return;
             if (down && !_recallWasDown)
             {
-                Position();
+                if (_streamingPanel != null && _streamingPanel.activeSelf) InitStreamingPanelPose();
+                else Position();
                 InitMicOrbPose();
                 Debug.Log("[StreamingUI] Recall (A): repositioned panel and orb");
             }
@@ -252,20 +321,18 @@ namespace SemanticXR.UI
             _streamingPanel = Mk.Panel(bg.transform, "Streaming", Color.clear);
             Mk.Stretch(_streamingPanel, 20);
 
-            // Dynamic title doubles as status: "Streaming to <name>" / "Connecting to <name>..."
-            _statusText = Mk.Label(_streamingPanel.transform, "", new Vector2(0, 55), 18, new Color(0.3f, 0.9f, 0.4f));
-
-            // Compact stats line on second row, centered under the title.
-            // Format: "Sent N · Q M · Drops K · X FPS · Upstream Y Mbps". Color goes orange on drops.
-            _statsText = Mk.Label(_streamingPanel.transform, "",
-                new Vector2(0, 25), 13, new Color(0.55f, 0.55f, 0.6f),
-                TextAlignmentOptions.Center, 500);
-            _statsText.GetComponent<RectTransform>().sizeDelta = new Vector2(500, 22);
+            // Combined single-line status + stats. Green half = "Streaming to X",
+            // gray half = "Sent N · Q N · Drops N · N FPS · Upstream N Mbps". Rich-text
+            // <color> tags handle the two-tone look inside one label; NoWrap keeps it
+            // on one line even when slightly wider than the bg.
+            _statusText = Mk.Label(_streamingPanel.transform, "", new Vector2(0, 38), 13, Color.white,
+                TextAlignmentOptions.Center, 600);
+            _statusText.textWrappingMode = TextWrappingModes.NoWrap;
 
             var textBoxBg = Mk.Panel(_streamingPanel.transform, "DictationBox",
                 new Color(0.12f, 0.12f, 0.18f, 0.9f));
             var tbR = textBoxBg.GetComponent<RectTransform>();
-            tbR.anchoredPosition = new Vector2(0, -30);
+            tbR.anchoredPosition = new Vector2(0, -15);
             tbR.sizeDelta = new Vector2(520, 70);
             textBoxBg.GetComponent<Image>().raycastTarget = false;
 
@@ -335,11 +402,9 @@ namespace SemanticXR.UI
         {
             var cam = Camera.main;
             if (cam == null || _micOrb == null) return;
-            var fwd = cam.transform.forward; fwd.y = 0;
-            if (fwd.sqrMagnitude < 0.001f) fwd = Vector3.forward;
-            _orbBodyForward = fwd.normalized;
+            SnapSharedBodyForward();
             _orbVelocity = Vector3.zero;
-            var p = cam.transform.position + _orbBodyForward * micOrbDistance;
+            var p = cam.transform.position + _bodyForward * micOrbDistance;
             p.y = cam.transform.position.y + micOrbVerticalOffset;
             _micOrb.transform.position = p;
             _micOrb.transform.rotation = Quaternion.LookRotation(p - cam.transform.position);
@@ -349,17 +414,10 @@ namespace SemanticXR.UI
         {
             var cam = Camera.main;
             if (cam == null) return;
-            var headFwd = cam.transform.forward; headFwd.y = 0;
-            if (headFwd.sqrMagnitude < 0.001f) return;
-            headFwd.Normalize();
-
-            float t = 1f - Mathf.Exp(-Time.deltaTime / Mathf.Max(0.01f, micOrbYawSmoothTime));
-            _orbBodyForward = Vector3.Slerp(_orbBodyForward, headFwd, t).normalized;
-
-            var target = cam.transform.position + _orbBodyForward * micOrbDistance;
+            var target = cam.transform.position + _bodyForward * micOrbDistance;
             target.y = cam.transform.position.y + micOrbVerticalOffset;
             _micOrb.transform.position = Vector3.SmoothDamp(
-                _micOrb.transform.position, target, ref _orbVelocity, micOrbPosSmoothTime);
+                _micOrb.transform.position, target, ref _orbVelocity, bodyPosSmoothTime);
             _micOrb.transform.rotation = Quaternion.LookRotation(
                 _micOrb.transform.position - cam.transform.position);
         }
@@ -422,7 +480,7 @@ namespace SemanticXR.UI
         {
             _connectPanel.SetActive(false);
             _streamingPanel.SetActive(true);
-            _canvasRect.sizeDelta = new Vector2(530, 140);
+            _canvasRect.sizeDelta = new Vector2(570, 110);
             System.Array.Clear(_bwSnapshots, 0, _bwSnapshots.Length);
             _bwIdx = 0;
             _bwNextSampleTime = Time.unscaledTime + 1f;
@@ -432,7 +490,7 @@ namespace SemanticXR.UI
             // vis_proto VisualizerServer.
             if (_audio != null && int.TryParse(_audioPortString, out int audioPort))
                 _audio.Configure(_ipAddress, audioPort);
-            Position();
+            InitStreamingPanelPose();
             if (_micOrb != null) { _micOrb.SetActive(true); InitMicOrbPose(); }
         }
         void ShowError(string msg) { _errorText.text = msg; _connectBtn.interactable = true; }
@@ -516,7 +574,14 @@ namespace SemanticXR.UI
 
             TryHandleRecallButton();
 
-            if (_micOrb != null && _micOrb.activeSelf) UpdateMicOrbPose();
+            // Step the shared body-forward once per frame, then let each body-locked
+            // widget damp its own position using the new value. Keeps panel + orb
+            // yaw-in-sync regardless of which ones happen to be visible.
+            bool panelActive = _streamingPanel != null && _streamingPanel.activeSelf;
+            bool orbActive   = _micOrb != null && _micOrb.activeSelf;
+            if (panelActive || orbActive) UpdateSharedBodyForward();
+            if (panelActive) UpdateStreamingPanelPose();
+            if (orbActive)   UpdateMicOrbPose();
 
             if (_keyboard != null)
             {
@@ -538,15 +603,9 @@ namespace SemanticXR.UI
             {
                 var err = _orchestrator.LastError;
                 if (!string.IsNullOrEmpty(err)) { _orchestrator.Disconnect(); ShowConnect(); ShowError(err); return; }
-                _statusText.text = _orchestrator.IsConnected
-                    ? $"Streaming to {CurrentServerName()}"
-                    : $"Connecting to {CurrentServerName()}...";
 
-                // Compact stats line: Sent · Q · Drops · FPS · Upstream  (color-coded on drops).
                 int totalDropped = _orchestrator.TotalDropped;
-                _statsText.color = totalDropped > 0
-                    ? new Color(1f, 0.7f, 0.3f)
-                    : new Color(0.55f, 0.55f, 0.6f);
+                string statsHex = totalDropped > 0 ? "#FFB24C" : "#8C8C99";
                 string fpsStr = _orchestrator.CaptureFps > 0 ? $"{_orchestrator.CaptureFps:F1}" : "—";
 
                 if (Time.unscaledTime >= _bwNextSampleTime)
@@ -561,7 +620,10 @@ namespace SemanticXR.UI
                     _bwNextSampleTime = Time.unscaledTime + 1f;
                 }
 
-                _statsText.text = $"Sent {_orchestrator.FrameCount} · Q {_orchestrator.QueuedFrames} · Drops {totalDropped} · {fpsStr} FPS · Upstream {_bwRateMbps:F2} Mbps";
+                string name = CurrentServerName();
+                _statusText.text = _orchestrator.IsConnected
+                    ? $"<color=#4DE666>Streaming to {name}</color>   <color={statsHex}>Sent {_orchestrator.FrameCount} · Q {_orchestrator.QueuedFrames} · Drops {totalDropped} · {fpsStr} FPS · Upstream {_bwRateMbps:F2} Mbps</color>"
+                    : $"<color=#4DE666>Connecting to {name}...</color>";
             }
         }
     }
