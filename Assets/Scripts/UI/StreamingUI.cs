@@ -110,6 +110,9 @@ namespace SemanticXR.UI
         SettingsPanel _settings;
         Button _gearBtn;
 
+        ConnectSettingsPanel _connectSettings;
+        Button _connectGearBtn;
+
         void Awake()
         {
             _ipAddress = IpPresets[0].ip;
@@ -387,6 +390,18 @@ namespace SemanticXR.UI
                 new Color(0.25f, 0.25f, 0.32f), 12, ToggleSkipTutorial);
             _skipTutorialLabel = _skipTutorialBtn.GetComponentInChildren<TextMeshProUGUI>();
 
+            // Connect-side settings: gear at top-right opens a sub-panel below
+            // the Connect panel for the per-session max-depth cap. Same pattern
+            // as the streaming-side gear/SettingsPanel.
+            _connectGearBtn = Mk.Btn(_connectPanel.transform, "",
+                new Vector2(260, 170), new Vector2(28, 28),
+                new Color(0.25f, 0.27f, 0.35f), 0, ToggleConnectSettings);
+            var connectGearIcon = IconFactory.MakeIconChild(_connectGearBtn.transform, "GearIcon", IconFactory.Gear);
+            connectGearIcon.GetComponent<RectTransform>().sizeDelta = new Vector2(22, 22);
+
+            _connectSettings = gameObject.AddComponent<ConnectSettingsPanel>();
+            _connectSettings.Build(_connectPanel.transform);
+
             _streamingPanel = Mk.Panel(bg.transform, "Streaming", Color.clear);
             Mk.Stretch(_streamingPanel, 20);
 
@@ -556,7 +571,8 @@ namespace SemanticXR.UI
             if (!int.TryParse(_portString, out int port) || port < 1 || port > 65535) { ShowError("Invalid port"); return; }
             _connectBtn.interactable = false;
             _errorText.text = "Connecting...";
-            _orchestrator.Connect(_ipAddress, port, _selectedFps);
+            float maxDepthM = _connectSettings != null ? _connectSettings.WireValue : 0f;
+            _orchestrator.Connect(_ipAddress, port, _selectedFps, maxDepthM);
         }
         void ShowConnect()
         {
@@ -604,6 +620,7 @@ namespace SemanticXR.UI
                 _audio.Configure(_ipAddress, audioPort);
             InitStreamingPanelPose();
             if (_micOrb != null) { _micOrb.SetActive(true); InitMicOrbPose(); }
+            _connectSettings?.Hide();
             _coach?.OnStreamingShown();
         }
         void ShowError(string msg) { _errorText.text = msg; _connectBtn.interactable = true; }
@@ -613,6 +630,13 @@ namespace SemanticXR.UI
             if (_settings == null) return;
             if (_settings.IsVisible) _settings.Hide();
             else _settings.Show();
+        }
+
+        void ToggleConnectSettings()
+        {
+            if (_connectSettings == null) return;
+            if (_connectSettings.IsVisible) _connectSettings.Hide();
+            else _connectSettings.Show();
         }
 
         void ToggleSkipTutorial()
@@ -694,6 +718,7 @@ namespace SemanticXR.UI
             TryHandleRecallButton();
             TryHandleMicHold();
             _settings?.Tick();
+            _connectSettings?.Tick();
 
             // Any trigger press dismisses the S3 popup. Fires before the
             // XRInteractionSetup click is dispatched so a tap aimed at the

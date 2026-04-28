@@ -28,6 +28,11 @@ namespace SemanticXR.Streaming
         readonly string _address;
         readonly int _port;
         readonly int _fps;
+        // Per-session far-depth cap stamped on every UpstreamSyncMessage_quest.
+        // Server reads it once on the first frame; same value goes out every frame
+        // so mid-session changes are no-ops rather than producing inconsistent
+        // geometry. See proto comment on UpstreamSyncMessage_quest.max_depth_m.
+        readonly float _maxDepthM;
 
         readonly ConcurrentQueue<FrameData> _sendQueue = new();
         Thread _sendThread;
@@ -55,11 +60,12 @@ namespace SemanticXR.Streaming
             get { var e = _lastError; _lastError = null; return e; }
         }
 
-        public GrpcFramesClient(string address, int port, int fps)
+        public GrpcFramesClient(string address, int port, int fps, float maxDepthM)
         {
-            _address = address;
-            _port    = port;
-            _fps     = fps;
+            _address    = address;
+            _port       = port;
+            _fps        = fps;
+            _maxDepthM  = float.IsNaN(maxDepthM) || float.IsInfinity(maxDepthM) ? 0f : maxDepthM;
         }
 
         public void Start()
@@ -173,6 +179,7 @@ namespace SemanticXR.Streaming
                 DepthFarZ        = f.DepthFarZ,
                 RgbTimestampNs   = f.RgbTimestampNs,
                 DepthTimestampNs = f.DepthTimestampNs,
+                MaxDepthM        = _maxDepthM,
             };
 
             static float[] LhToRh(Matrix4x4 m) => new[]

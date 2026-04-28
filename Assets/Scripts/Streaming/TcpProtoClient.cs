@@ -19,6 +19,7 @@ namespace SemanticXR.Streaming
         readonly string _address;
         readonly int _port;
         readonly int _fps;
+        readonly float _maxDepthM;   // see GrpcFramesClient — same per-session cap semantics
 
         TcpClient _tcp;
         NetworkStream _stream;
@@ -42,11 +43,12 @@ namespace SemanticXR.Streaming
             get { var e = _lastError; _lastError = null; return e; }
         }
 
-        public TcpProtoClient(string address, int port, int fps)
+        public TcpProtoClient(string address, int port, int fps, float maxDepthM)
         {
-            _address = address;
-            _port = port;
-            _fps = fps;
+            _address    = address;
+            _port       = port;
+            _fps        = fps;
+            _maxDepthM  = float.IsNaN(maxDepthM) || float.IsInfinity(maxDepthM) ? 0f : maxDepthM;
         }
 
         public void Start()
@@ -155,6 +157,7 @@ namespace SemanticXR.Streaming
                 DepthFarZ = f.DepthFarZ,
                 RgbTimestampNs = f.RgbTimestampNs,
                 DepthTimestampNs = f.DepthTimestampNs,
+                MaxDepthM = _maxDepthM,
             };
 
             // Helper: Unity left-handed -> right-handed (negate Z column & row)

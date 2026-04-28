@@ -1386,6 +1386,7 @@ namespace Xr {
       depthArr_ = other.depthArr_.Clone();
       pose_ = other.pose_ != null ? other.pose_.Clone() : null;
       fps_ = other.fps_;
+      maxDepthM_ = other.maxDepthM_;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -1442,6 +1443,14 @@ namespace Xr {
       }
     }
 
+    /// <summary>Field number for the "max_depth_m" field.</summary>
+    public const int MaxDepthMFieldNumber = 5;
+    private float maxDepthM_;
+    public float MaxDepthM {
+      get { return maxDepthM_; }
+      set { maxDepthM_ = value; }
+    }
+
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public override bool Equals(object other) {
@@ -1461,6 +1470,7 @@ namespace Xr {
       if(!depthArr_.Equals(other.depthArr_)) return false;
       if (!object.Equals(Pose, other.Pose)) return false;
       if (Fps != other.Fps) return false;
+      if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(MaxDepthM, other.MaxDepthM)) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -1472,6 +1482,7 @@ namespace Xr {
       hash ^= depthArr_.GetHashCode();
       if (pose_ != null) hash ^= Pose.GetHashCode();
       if (Fps != 0) hash ^= Fps.GetHashCode();
+      if (MaxDepthM != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(MaxDepthM);
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -1503,6 +1514,10 @@ namespace Xr {
         output.WriteRawTag(32);
         output.WriteInt32(Fps);
       }
+      if (MaxDepthM != 0F) {
+        output.WriteRawTag(45);
+        output.WriteFloat(MaxDepthM);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -1526,6 +1541,10 @@ namespace Xr {
         output.WriteRawTag(32);
         output.WriteInt32(Fps);
       }
+      if (MaxDepthM != 0F) {
+        output.WriteRawTag(45);
+        output.WriteFloat(MaxDepthM);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(ref output);
       }
@@ -1545,6 +1564,9 @@ namespace Xr {
       }
       if (Fps != 0) {
         size += 1 + pb::CodedOutputStream.ComputeInt32Size(Fps);
+      }
+      if (MaxDepthM != 0F) {
+        size += 1 + 4;
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -1573,6 +1595,9 @@ namespace Xr {
       }
       if (other.Fps != 0) {
         Fps = other.Fps;
+      }
+      if (other.MaxDepthM != 0F) {
+        MaxDepthM = other.MaxDepthM;
       }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
@@ -1616,6 +1641,10 @@ namespace Xr {
             Fps = input.ReadInt32();
             break;
           }
+          case 45: {
+            MaxDepthM = input.ReadFloat();
+            break;
+          }
         }
       }
     #endif
@@ -1656,6 +1685,10 @@ namespace Xr {
           }
           case 32: {
             Fps = input.ReadInt32();
+            break;
+          }
+          case 45: {
+            MaxDepthM = input.ReadFloat();
             break;
           }
         }
@@ -1706,6 +1739,7 @@ namespace Xr {
       fps_ = other.fps_;
       scalingFactor_ = other.scalingFactor_;
       timestampNs_ = other.timestampNs_;
+      maxDepthM_ = other.maxDepthM_;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -1789,6 +1823,14 @@ namespace Xr {
       }
     }
 
+    /// <summary>Field number for the "max_depth_m" field.</summary>
+    public const int MaxDepthMFieldNumber = 7;
+    private float maxDepthM_;
+    public float MaxDepthM {
+      get { return maxDepthM_; }
+      set { maxDepthM_ = value; }
+    }
+
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public override bool Equals(object other) {
@@ -1810,6 +1852,7 @@ namespace Xr {
       if (Fps != other.Fps) return false;
       if (ScalingFactor != other.ScalingFactor) return false;
       if (TimestampNs != other.TimestampNs) return false;
+      if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(MaxDepthM, other.MaxDepthM)) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -1823,6 +1866,7 @@ namespace Xr {
       if (Fps != 0) hash ^= Fps.GetHashCode();
       if (ScalingFactor != 0) hash ^= ScalingFactor.GetHashCode();
       if (TimestampNs != 0L) hash ^= TimestampNs.GetHashCode();
+      if (MaxDepthM != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(MaxDepthM);
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -1862,6 +1906,10 @@ namespace Xr {
         output.WriteRawTag(48);
         output.WriteInt64(TimestampNs);
       }
+      if (MaxDepthM != 0F) {
+        output.WriteRawTag(61);
+        output.WriteFloat(MaxDepthM);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -1893,6 +1941,10 @@ namespace Xr {
         output.WriteRawTag(48);
         output.WriteInt64(TimestampNs);
       }
+      if (MaxDepthM != 0F) {
+        output.WriteRawTag(61);
+        output.WriteFloat(MaxDepthM);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(ref output);
       }
@@ -1918,6 +1970,9 @@ namespace Xr {
       }
       if (TimestampNs != 0L) {
         size += 1 + pb::CodedOutputStream.ComputeInt64Size(TimestampNs);
+      }
+      if (MaxDepthM != 0F) {
+        size += 1 + 4;
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -1949,6 +2004,9 @@ namespace Xr {
       }
       if (other.TimestampNs != 0L) {
         TimestampNs = other.TimestampNs;
+      }
+      if (other.MaxDepthM != 0F) {
+        MaxDepthM = other.MaxDepthM;
       }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
@@ -1997,6 +2055,10 @@ namespace Xr {
             TimestampNs = input.ReadInt64();
             break;
           }
+          case 61: {
+            MaxDepthM = input.ReadFloat();
+            break;
+          }
         }
       }
     #endif
@@ -2042,6 +2104,10 @@ namespace Xr {
           }
           case 48: {
             TimestampNs = input.ReadInt64();
+            break;
+          }
+          case 61: {
+            MaxDepthM = input.ReadFloat();
             break;
           }
         }
@@ -2414,6 +2480,7 @@ namespace Xr {
       headPose_ = other.headPose_.Clone();
       rgbCameraPose_ = other.rgbCameraPose_.Clone();
       depthFovTangents_ = other.depthFovTangents_.Clone();
+      maxDepthM_ = other.maxDepthM_;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -2691,6 +2758,18 @@ namespace Xr {
       get { return depthFovTangents_; }
     }
 
+    /// <summary>Field number for the "max_depth_m" field.</summary>
+    public const int MaxDepthMFieldNumber = 20;
+    private float maxDepthM_;
+    /// <summary>
+    /// Per-session far-depth cap. 0.0 = use server YAML default, negative =
+    /// no cap, positive = cap in meters. See proto comment.
+    /// </summary>
+    public float MaxDepthM {
+      get { return maxDepthM_; }
+      set { maxDepthM_ = value; }
+    }
+
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public override bool Equals(object other) {
@@ -2725,6 +2804,7 @@ namespace Xr {
       if(!headPose_.Equals(other.headPose_)) return false;
       if(!rgbCameraPose_.Equals(other.rgbCameraPose_)) return false;
       if(!depthFovTangents_.Equals(other.depthFovTangents_)) return false;
+      if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(MaxDepthM, other.MaxDepthM)) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -2751,6 +2831,7 @@ namespace Xr {
       hash ^= headPose_.GetHashCode();
       hash ^= rgbCameraPose_.GetHashCode();
       hash ^= depthFovTangents_.GetHashCode();
+      if (MaxDepthM != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(MaxDepthM);
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -2830,6 +2911,10 @@ namespace Xr {
       headPose_.WriteTo(output, _repeated_headPose_codec);
       rgbCameraPose_.WriteTo(output, _repeated_rgbCameraPose_codec);
       depthFovTangents_.WriteTo(output, _repeated_depthFovTangents_codec);
+      if (MaxDepthM != 0F) {
+        output.WriteRawTag(165, 1);
+        output.WriteFloat(MaxDepthM);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -2901,6 +2986,10 @@ namespace Xr {
       headPose_.WriteTo(ref output, _repeated_headPose_codec);
       rgbCameraPose_.WriteTo(ref output, _repeated_rgbCameraPose_codec);
       depthFovTangents_.WriteTo(ref output, _repeated_depthFovTangents_codec);
+      if (MaxDepthM != 0F) {
+        output.WriteRawTag(165, 1);
+        output.WriteFloat(MaxDepthM);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(ref output);
       }
@@ -2958,6 +3047,9 @@ namespace Xr {
       size += headPose_.CalculateSize(_repeated_headPose_codec);
       size += rgbCameraPose_.CalculateSize(_repeated_rgbCameraPose_codec);
       size += depthFovTangents_.CalculateSize(_repeated_depthFovTangents_codec);
+      if (MaxDepthM != 0F) {
+        size += 2 + 4;   // 2-byte tag (field 20, wire 5) + IEEE-754 float
+      }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
       }
@@ -3026,6 +3118,9 @@ namespace Xr {
       headPose_.Add(other.headPose_);
       rgbCameraPose_.Add(other.rgbCameraPose_);
       depthFovTangents_.Add(other.depthFovTangents_);
+      if (other.MaxDepthM != 0F) {
+        MaxDepthM = other.MaxDepthM;
+      }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
 
@@ -3135,6 +3230,10 @@ namespace Xr {
             depthFovTangents_.AddEntriesFrom(input, _repeated_depthFovTangents_codec);
             break;
           }
+          case 165: {
+            MaxDepthM = input.ReadFloat();
+            break;
+          }
         }
       }
     #endif
@@ -3242,6 +3341,10 @@ namespace Xr {
           case 154:
           case 157: {
             depthFovTangents_.AddEntriesFrom(ref input, _repeated_depthFovTangents_codec);
+            break;
+          }
+          case 165: {
+            MaxDepthM = input.ReadFloat();
             break;
           }
         }

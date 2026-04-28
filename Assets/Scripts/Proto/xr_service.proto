@@ -46,6 +46,12 @@ message UpstreamSyncMessage {
   repeated float depthArr = 2 [packed=true];
   PoseData pose = 3;
   int32 fps = 4;
+  // Per-session far-depth cap, read once on the first frame of a stream:
+  //   0.0 / unset → "client did not specify"; server uses YAML default
+  //   negative   → explicit "no cap"; far-depth filter disabled
+  //   positive   → cap value in meters
+  // Stamp the same value on every frame; the server ignores changes mid-session.
+  float max_depth_m = 5;
 }
 
 message UpstreamSyncMessage_dataset {
@@ -56,6 +62,8 @@ message UpstreamSyncMessage_dataset {
   int32 fps = 4;
   int32 scaling_factor = 5;
   int64 timestamp_ns = 6;
+  // See UpstreamSyncMessage.max_depth_m comment.
+  float max_depth_m = 7;
 }
 
 message CameraIntrinsics {
@@ -105,6 +113,13 @@ message UpstreamSyncMessage_quest {
   // The depth_intrinsics field is derived from these via the standard pinhole model.
   // Storing both lets the server verify the conversion or use a non-pinhole model if desired.
   repeated float depth_fov_tangents = 19 [packed=true];
+
+  // Per-session far-depth cap, read once on the first frame of a stream:
+  //   0.0 / unset → "client did not specify"; server uses YAML default
+  //   negative   → explicit "no cap"; far-depth filter disabled
+  //   positive   → cap value in meters
+  // Stamp the same value on every frame; the server ignores changes mid-session.
+  float max_depth_m = 20;
 }
 
 service XrService {

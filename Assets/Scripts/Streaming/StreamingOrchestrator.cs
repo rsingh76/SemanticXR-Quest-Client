@@ -133,7 +133,13 @@ namespace SemanticXR.Streaming
         public event Action OnDisconnected;
         public event Action<string> OnError;
 
-        public void Connect(string address, int port, int fps)
+        // maxDepthM: per-session far-depth cap stamped on every frame.
+        //   0.0  → use server YAML default (the "did not specify" sentinel)
+        //   <0   → explicit "no cap"
+        //   >0   → cap value in meters
+        // Server reads it once on the first frame of the upstream stream;
+        // disconnect+reconnect to change it.
+        public void Connect(string address, int port, int fps, float maxDepthM)
         {
             if (_tcp != null) return;
 
@@ -145,9 +151,9 @@ namespace SemanticXR.Streaming
             ServerTarget = $"{address}:{port}";
 
             _tcp = transport == FramesTransport.Grpc
-                ? (IFramesClient)new GrpcFramesClient(address, port, fps)
-                : new TcpProtoClient(address, port, fps);
-            Debug.LogWarning($"[Orchestrator] Frames transport = {transport}");
+                ? (IFramesClient)new GrpcFramesClient(address, port, fps, maxDepthM)
+                : new TcpProtoClient(address, port, fps, maxDepthM);
+            Debug.LogWarning($"[Orchestrator] Frames transport = {transport}, max_depth_m = {maxDepthM:F2}");
             _tcp.Start();
 
             OnConnected?.Invoke();
