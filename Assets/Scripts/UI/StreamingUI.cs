@@ -532,6 +532,7 @@ namespace SemanticXR.UI
         void OnPointCloudsReceived(XrVis.allPointClouds response)
         {
             if (_visualizer == null || response == null) return;
+            _visualizer.Clear();
             var (objects, points) = _visualizer.AddResponse(response);
             string query = string.IsNullOrEmpty(response.TextQuery) ? "(none)" : response.TextQuery;
             string msg = $"Query: {query}\nReceived: {objects} objects, {points} points ({response.ServerQueryProcessing:F0} ms)";
