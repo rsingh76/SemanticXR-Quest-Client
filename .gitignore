@@ -35,3 +35,16 @@ debug_server/*.wav
 
 # Secrets — never commit
 ProjectSettings/wit.config
+
+# Local-only artefacts at the repo root: screen recordings, screenshots,
+# Unity transient assemblies. These don't belong in the source tree.
+*.mp4
+*.mov
+*.gif
+*.jpg
+*.jpeg
+*.png
+TempAssembly.dll
+!Assets/**/*.png    # but Unity assets under Assets/ are fine
+!Assets/**/*.jpg
+!Assets/**/*.jpeg
