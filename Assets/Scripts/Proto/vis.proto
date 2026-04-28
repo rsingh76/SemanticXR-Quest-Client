@@ -45,6 +45,8 @@ message Status {
 message AudioFile{
     bytes chunk_data = 1;
     string textQuery = 2;
+    optional float similarity_threshold = 3;
+    optional float min_match_similarity = 4;
 }
 
 service VisualizerServer {

@@ -139,6 +139,57 @@ namespace SemanticXR.UI
             return (objectCount, pointTotal);
         }
 
+        // Live-tune the per-point alpha. We REBUILD each cluster's material
+        // (rather than just patching `_BaseColor` on the existing one) because:
+        //
+        //   1. Material.color writes the legacy "_Color" slot only — URP
+        //      Particles/Unlit reads "_BaseColor", so the shortcut is a no-op
+        //      on Quest URP.
+        //   2. Even when we explicitly SetColor("_BaseColor", …), the SRP
+        //      batcher can serve the stale baked color until the renderer's
+        //      material reference itself changes.
+        //   3. MakeTranslucentMaterial sets up shader keywords (e.g.
+        //      _ALPHAMODULATE_ON) that we'd have to re-poke too. Letting it
+        //      build the material from scratch keeps everything consistent.
+        //
+        // Each cluster's spheres share one material, so we map oldMat→newMat
+        // once per cluster, then destroy the old materials at the end.
+        public void SetPointAlpha(float a)
+        {
+            pointAlpha = Mathf.Clamp(a, 0.01f, 1f);
+            var oldToNew = new Dictionary<Material, Material>();
+
+            foreach (var batch in _batches)
+                foreach (var go in batch)
+                {
+                    if (go == null) continue;
+                    var r = go.GetComponent<Renderer>();
+                    var oldMat = r?.sharedMaterial;
+                    if (oldMat == null) continue;
+                    if (!oldToNew.TryGetValue(oldMat, out var newMat))
+                    {
+                        newMat = MakeTranslucentMaterial(ExtractRgb(oldMat));
+                        oldToNew[oldMat] = newMat;
+                    }
+                    r.sharedMaterial = newMat;
+                }
+
+            foreach (var oldMat in oldToNew.Keys) Destroy(oldMat);
+            Debug.Log($"[PointCloudVisualizer] SetPointAlpha({pointAlpha:F2}) — rebuilt {oldToNew.Count} materials across {_batches.Count} batches");
+        }
+
+        // Pull RGB out of whichever color slot the shader actually uses, with
+        // alpha stripped — MakeTranslucentMaterial re-bakes pointAlpha.
+        static Color ExtractRgb(Material m)
+        {
+            Color c;
+            if      (m.HasProperty("_BaseColor")) c = m.GetColor("_BaseColor");
+            else if (m.HasProperty("_TintColor")) c = m.GetColor("_TintColor");
+            else                                  c = m.color;
+            c.a = 1f;
+            return c;
+        }
+
         public void Clear()
         {
             foreach (var batch in _batches)

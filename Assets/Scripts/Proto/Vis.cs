@@ -1589,8 +1589,11 @@ namespace XrVis {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public AudioFile(AudioFile other) : this() {
+      _hasBits0 = other._hasBits0;
       chunkData_ = other.chunkData_;
       textQuery_ = other.textQuery_;
+      similarityThreshold_ = other.similarityThreshold_;
+      minMatchSimilarity_ = other.minMatchSimilarity_;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -1624,6 +1627,33 @@ namespace XrVis {
       }
     }
 
+    // Presence bits for proto3 optional scalars. Bit 0 = similarity_threshold,
+    // bit 1 = min_match_similarity. Hand-added (this file's protoc didn't ship
+    // optional support); pattern mirrors what current protoc emits.
+    private int _hasBits0;
+
+    /// <summary>Field number for the "similarity_threshold" field.</summary>
+    public const int SimilarityThresholdFieldNumber = 3;
+    private readonly static float SimilarityThresholdDefaultValue = 0F;
+    private float similarityThreshold_;
+    public float SimilarityThreshold {
+      get { if ((_hasBits0 & 1) != 0) { return similarityThreshold_; } else { return SimilarityThresholdDefaultValue; } }
+      set { _hasBits0 |= 1; similarityThreshold_ = value; }
+    }
+    public bool HasSimilarityThreshold { get { return (_hasBits0 & 1) != 0; } }
+    public void ClearSimilarityThreshold() { _hasBits0 &= ~1; }
+
+    /// <summary>Field number for the "min_match_similarity" field.</summary>
+    public const int MinMatchSimilarityFieldNumber = 4;
+    private readonly static float MinMatchSimilarityDefaultValue = 0F;
+    private float minMatchSimilarity_;
+    public float MinMatchSimilarity {
+      get { if ((_hasBits0 & 2) != 0) { return minMatchSimilarity_; } else { return MinMatchSimilarityDefaultValue; } }
+      set { _hasBits0 |= 2; minMatchSimilarity_ = value; }
+    }
+    public bool HasMinMatchSimilarity { get { return (_hasBits0 & 2) != 0; } }
+    public void ClearMinMatchSimilarity() { _hasBits0 &= ~2; }
+
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public override bool Equals(object other) {
@@ -1641,6 +1671,10 @@ namespace XrVis {
       }
       if (ChunkData != other.ChunkData) return false;
       if (TextQuery != other.TextQuery) return false;
+      if (HasSimilarityThreshold != other.HasSimilarityThreshold) return false;
+      if (HasSimilarityThreshold && SimilarityThreshold != other.SimilarityThreshold) return false;
+      if (HasMinMatchSimilarity != other.HasMinMatchSimilarity) return false;
+      if (HasMinMatchSimilarity && MinMatchSimilarity != other.MinMatchSimilarity) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -1650,6 +1684,8 @@ namespace XrVis {
       int hash = 1;
       if (ChunkData.Length != 0) hash ^= ChunkData.GetHashCode();
       if (TextQuery.Length != 0) hash ^= TextQuery.GetHashCode();
+      if (HasSimilarityThreshold) hash ^= SimilarityThreshold.GetHashCode();
+      if (HasMinMatchSimilarity)  hash ^= MinMatchSimilarity.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -1676,6 +1712,14 @@ namespace XrVis {
         output.WriteRawTag(18);
         output.WriteString(TextQuery);
       }
+      if (HasSimilarityThreshold) {
+        output.WriteRawTag(29);
+        output.WriteFloat(SimilarityThreshold);
+      }
+      if (HasMinMatchSimilarity) {
+        output.WriteRawTag(37);
+        output.WriteFloat(MinMatchSimilarity);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -1694,6 +1738,14 @@ namespace XrVis {
         output.WriteRawTag(18);
         output.WriteString(TextQuery);
       }
+      if (HasSimilarityThreshold) {
+        output.WriteRawTag(29);
+        output.WriteFloat(SimilarityThreshold);
+      }
+      if (HasMinMatchSimilarity) {
+        output.WriteRawTag(37);
+        output.WriteFloat(MinMatchSimilarity);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(ref output);
       }
@@ -1709,6 +1761,12 @@ namespace XrVis {
       }
       if (TextQuery.Length != 0) {
         size += 1 + pb::CodedOutputStream.ComputeStringSize(TextQuery);
+      }
+      if (HasSimilarityThreshold) {
+        size += 1 + 4;   // tag byte + IEEE-754 float (fixed32)
+      }
+      if (HasMinMatchSimilarity) {
+        size += 1 + 4;
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -1727,6 +1785,12 @@ namespace XrVis {
       }
       if (other.TextQuery.Length != 0) {
         TextQuery = other.TextQuery;
+      }
+      if (other.HasSimilarityThreshold) {
+        SimilarityThreshold = other.SimilarityThreshold;
+      }
+      if (other.HasMinMatchSimilarity) {
+        MinMatchSimilarity = other.MinMatchSimilarity;
       }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
@@ -1755,6 +1819,14 @@ namespace XrVis {
             TextQuery = input.ReadString();
             break;
           }
+          case 29: {
+            SimilarityThreshold = input.ReadFloat();
+            break;
+          }
+          case 37: {
+            MinMatchSimilarity = input.ReadFloat();
+            break;
+          }
         }
       }
     #endif
@@ -1780,6 +1852,14 @@ namespace XrVis {
           }
           case 18: {
             TextQuery = input.ReadString();
+            break;
+          }
+          case 29: {
+            SimilarityThreshold = input.ReadFloat();
+            break;
+          }
+          case 37: {
+            MinMatchSimilarity = input.ReadFloat();
             break;
           }
         }

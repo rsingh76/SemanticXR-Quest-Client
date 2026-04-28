@@ -30,6 +30,23 @@ namespace SemanticXR.UI
         string _serverAddress;
         int    _serverPort;
 
+        // Per-query thresholds stamped on the outgoing AudioFile. Server
+        // honors these as overrides of its YAML defaults; we always send both.
+        // 0.95 / 0.25 mirror the server defaults at time of writing.
+        float _similarityThreshold = 0.95f;
+        float _minMatchSimilarity  = 0.25f;
+
+        // Live-set by the settings panel. Clamps and rejects NaN so the wire
+        // never carries an out-of-range value (the server validates too, but
+        // a clean client saves a debugging trip).
+        public void SetThresholds(float similarity, float minMatch)
+        {
+            if (!float.IsNaN(similarity)) _similarityThreshold = Mathf.Clamp01(similarity);
+            if (!float.IsNaN(minMatch))   _minMatchSimilarity  = Mathf.Clamp01(minMatch);
+        }
+        public float SimilarityThreshold => _similarityThreshold;
+        public float MinMatchSimilarity  => _minMatchSimilarity;
+
         string       _deviceName;
         AudioClip    _clip;
         AudioSource  _keepAliveSource;     // consumes the mic clip so Android doesn't stop writing samples
@@ -289,7 +306,14 @@ namespace SemanticXR.UI
                 var call = client.clientTextQuery();
                 try
                 {
-                    var msg = new AudioFile { ChunkData = ByteString.CopyFrom(pcm) };
+                    // Stamp thresholds on the first (and currently only) chunk
+                    // of each stream — server takes last-wins, so once is enough.
+                    var msg = new AudioFile
+                    {
+                        ChunkData           = ByteString.CopyFrom(pcm),
+                        SimilarityThreshold = _similarityThreshold,
+                        MinMatchSimilarity  = _minMatchSimilarity,
+                    };
                     await call.RequestStream.WriteAsync(msg);
                     await call.RequestStream.CompleteAsync();
                     var response = await call.ResponseAsync;

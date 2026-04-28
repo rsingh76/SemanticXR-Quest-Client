@@ -107,6 +107,9 @@ namespace SemanticXR.UI
         Button _skipTutorialBtn;
         TextMeshProUGUI _skipTutorialLabel;
 
+        SettingsPanel _settings;
+        Button _gearBtn;
+
         void Awake()
         {
             _ipAddress = IpPresets[0].ip;
@@ -409,6 +412,28 @@ namespace SemanticXR.UI
             dtR.sizeDelta = new Vector2(500, 60);
             _dictationText.textWrappingMode = TextWrappingModes.Normal;
 
+            // Settings sub-panel (translucence + similarity + min-match sliders).
+            // Hidden by default; toggled by the gear button below.
+            _settings = gameObject.AddComponent<SettingsPanel>();
+            _settings.Build(
+                _streamingPanel.transform,
+                translucence: 0.18f,
+                similarity:   0.95f,
+                minMatch:     0.25f);
+            _settings.OnTranslucenceChanged += a => _visualizer?.SetPointAlpha(a);
+            _settings.OnSimilarityChanged   += s => _audio?.SetThresholds(s, _audio.MinMatchSimilarity);
+            _settings.OnMinMatchChanged     += m => _audio?.SetThresholds(_audio.SimilarityThreshold, m);
+
+            // Gear button: top-right of the streaming panel. Tap toggles the
+            // settings sub-panel below. Uses an IconFactory.Gear sprite as a
+            // child — TMP's bundled font has no "⚙" glyph, so a sprite is the
+            // only option that renders reliably on Quest.
+            _gearBtn = Mk.Btn(_streamingPanel.transform, "",
+                new Vector2(245, 32), new Vector2(28, 28),
+                new Color(0.25f, 0.27f, 0.35f), 0, ToggleSettings);
+            var gearIcon = IconFactory.MakeIconChild(_gearBtn.transform, "GearIcon", IconFactory.Gear);
+            gearIcon.GetComponent<RectTransform>().sizeDelta = new Vector2(22, 22);
+
             // Mic + Clear + Disconnect all live on a body-locked orb (see BuildMicOrb).
             _streamingPanel.SetActive(false);
 
@@ -542,6 +567,7 @@ namespace SemanticXR.UI
             _connectPanel.SetActive(true);
             _streamingPanel.SetActive(false);
             if (_micOrb != null) _micOrb.SetActive(false);
+            _settings?.Hide();
             Position();
 
             // Tutorial defaults back to ON every time the Connect panel returns,
@@ -581,6 +607,13 @@ namespace SemanticXR.UI
             _coach?.OnStreamingShown();
         }
         void ShowError(string msg) { _errorText.text = msg; _connectBtn.interactable = true; }
+
+        void ToggleSettings()
+        {
+            if (_settings == null) return;
+            if (_settings.IsVisible) _settings.Hide();
+            else _settings.Show();
+        }
 
         void ToggleSkipTutorial()
         {
@@ -660,6 +693,7 @@ namespace SemanticXR.UI
 
             TryHandleRecallButton();
             TryHandleMicHold();
+            _settings?.Tick();
 
             // Any trigger press dismisses the S3 popup. Fires before the
             // XRInteractionSetup click is dispatched so a tap aimed at the
@@ -921,7 +955,7 @@ namespace SemanticXR.UI
     // Textures are 128x128 RGBA, cached as static singletons.
     static class IconFactory
     {
-        static Sprite _mic, _stop, _circle, _trash, _power, _triDown, _arrow;
+        static Sprite _mic, _stop, _circle, _trash, _power, _triDown, _arrow, _gear;
 
         public static Sprite Mic     => _mic     ??= BuildMic();
         public static Sprite Stop    => _stop    ??= BuildStop();
@@ -930,6 +964,7 @@ namespace SemanticXR.UI
         public static Sprite Power   => _power   ??= BuildPower();
         public static Sprite TriDown => _triDown ??= BuildTriDown();
         public static Sprite Arrow   => _arrow   ??= BuildArrow();
+        public static Sprite Gear    => _gear    ??= BuildGear();
 
         const int Size = 128;
 
@@ -1000,6 +1035,65 @@ namespace SemanticXR.UI
             // Image rect displays texture with y=0 at bottom, so apex appears at bottom.
             FillTriDown(px, 64, 38, 84, 30, Color.white);
             return MakeSprite(px);
+        }
+
+        static Sprite BuildGear()
+        {
+            var px = ClearBuffer();
+            FillGear(px, cx: 64f, cy: 64f,
+                rOuter: 56f,    // tooth tips
+                rInner: 44f,    // base of teeth (between teeth)
+                rHole:  20f,    // center hole
+                teeth:  8,
+                color: Color.white);
+            return MakeSprite(px);
+        }
+
+        // Eight-tooth gear with anti-aliased outer + hole edges.
+        // Tooth side edges are hard (one-pixel jaggy on the 128² buffer); the
+        // sprite is downscaled to ~28 px in the UI so bilinear filtering hides
+        // those edges.
+        static void FillGear(Color32[] px, float cx, float cy,
+                             float rOuter, float rInner, float rHole,
+                             int teeth, Color color)
+        {
+            int xmin = Mathf.Max(0, Mathf.FloorToInt(cx - rOuter - 1));
+            int xmax = Mathf.Min(Size - 1, Mathf.CeilToInt(cx + rOuter + 1));
+            int ymin = Mathf.Max(0, Mathf.FloorToInt(cy - rOuter - 1));
+            int ymax = Mathf.Min(Size - 1, Mathf.CeilToInt(cy + rOuter + 1));
+            float twoPi = Mathf.PI * 2f;
+
+            for (int y = ymin; y <= ymax; y++)
+            {
+                for (int x = xmin; x <= xmax; x++)
+                {
+                    float pxF = x + 0.5f, pyF = y + 0.5f;
+                    float dx = pxF - cx, dy = pyF - cy;
+                    float r = Mathf.Sqrt(dx * dx + dy * dy);
+                    if (r > rOuter + 1f) continue;
+
+                    // Tooth/gap modulation: phase 0..0.5 = tooth (rOuter), 0.5..1 = gap (rInner).
+                    float angle = Mathf.Atan2(dy, dx);
+                    if (angle < 0) angle += twoPi;
+                    float toothPhase = (angle * teeth / twoPi) % 1f;
+                    float currentOuter = toothPhase < 0.5f ? rOuter : rInner;
+
+                    // AA at outer edge of current radius, AA at hole edge.
+                    float aOuter = Mathf.Clamp01(0.5f + currentOuter - r);
+                    float aHole  = Mathf.Clamp01(0.5f + r - rHole);
+                    float a = aOuter * aHole;
+                    if (a <= 0) continue;
+
+                    int idx = y * Size + x;
+                    byte newA = (byte)Mathf.RoundToInt(color.a * a * 255f);
+                    if (newA > px[idx].a)
+                        px[idx] = new Color32(
+                            (byte)Mathf.RoundToInt(color.r * 255f),
+                            (byte)Mathf.RoundToInt(color.g * 255f),
+                            (byte)Mathf.RoundToInt(color.b * 255f),
+                            newA);
+                }
+            }
         }
 
         static Sprite BuildArrow()
