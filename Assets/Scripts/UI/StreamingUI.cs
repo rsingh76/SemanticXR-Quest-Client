@@ -3,6 +3,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using UnityEngine.XR;
+using UnityEngine.XR.Interaction.Toolkit.Interactors;
 using UnityEngine.XR.Interaction.Toolkit.UI;
 using TMPro;
 using SemanticXR.Streaming;
@@ -102,6 +103,10 @@ namespace SemanticXR.UI
         GameObject _micOrb;
         Vector3 _orbVelocity;
 
+        CoachMarks _coach;
+        Button _skipTutorialBtn;
+        TextMeshProUGUI _skipTutorialLabel;
+
         void Awake()
         {
             _ipAddress = IpPresets[0].ip;
@@ -133,6 +138,11 @@ namespace SemanticXR.UI
             var arrowHost = new GameObject("OffscreenArrow");
             arrowHost.transform.SetParent(transform, worldPositionStays: false);
             arrowHost.AddComponent<OffscreenPointCloudArrow>().Bind(_visualizer);
+
+            // Onboarding coach marks (S1 Connect, S2 Hold-to-talk, S3 Color popup).
+            // Targets are wired in BuildUI() once the panels exist.
+            _coach = gameObject.AddComponent<CoachMarks>();
+            _visualizer.OnFirstClusterRendered += () => _coach?.OnFirstCluster();
 
             // Initial frames port follows whichever transport the orchestrator
             // defaults to. Kept in sync on toggle via ToggleTransport().
@@ -259,6 +269,52 @@ namespace SemanticXR.UI
             _recallWasDown = down;
         }
 
+        // Hold-to-talk on the mic orb. We poll the trigger directly here for the
+        // same reason XRInteractionSetup does: the project's XRRayInteractors
+        // don't have a UI press input action wired, so XRUIInputModule never
+        // dispatches PointerDown/PointerUp and EventTrigger handlers don't fire.
+        // Mirrors XRInteractionSetup's pattern: edge-detect trigger, look up the
+        // current UI raycast hit, dispatch when the hit is the mic button.
+        //
+        // Latch behavior: once down-on-mic starts recording, ANY trigger-up
+        // stops and sends — the controller can wander off the orb mid-sentence
+        // without losing the take.
+        void TryHandleMicHold()
+        {
+            if (_audio == null || _micBtn == null) return;
+
+            bool triggerDown = OVRInput.GetDown(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.RTouch)
+                            || OVRInput.GetDown(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.LTouch);
+            bool triggerUp   = OVRInput.GetUp  (OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.RTouch)
+                            || OVRInput.GetUp  (OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.LTouch);
+
+            if (triggerDown && !_audio.IsListening && IsRayHittingMic())
+            {
+                Debug.Log("[StreamingUI] mic press — starting recording");
+                _audio.StartListening();
+            }
+            else if (triggerUp && _audio.IsListening)
+            {
+                Debug.Log("[StreamingUI] mic release — stopping & sending");
+                _audio.StopListening();
+            }
+        }
+
+        bool IsRayHittingMic()
+        {
+            var micT = _micBtn.transform;
+            foreach (var ray in FindObjectsByType<XRRayInteractor>(FindObjectsSortMode.None))
+            {
+                if (!ray.TryGetCurrentUIRaycastResult(out var result) || result.gameObject == null)
+                    continue;
+                // Walk up — the raycast hit can be the icon child rather than
+                // the button itself, depending on which graphic the ray pierced.
+                for (var t = result.gameObject.transform; t != null; t = t.parent)
+                    if (t == micT) return true;
+            }
+            return false;
+        }
+
         void BuildUI()
         {
             var go = new GameObject("StreamCanvas");
@@ -282,7 +338,7 @@ namespace SemanticXR.UI
 
             Mk.Label(_connectPanel.transform, "SemanticXR", new Vector2(0, 160), 32, Color.white);
 
-            Mk.Label(_connectPanel.transform, "Server IP", new Vector2(0, 115), 16, new Color(0.6f, 0.6f, 0.65f));
+            Mk.Label(_connectPanel.transform, "System IP", new Vector2(0, 115), 16, new Color(0.6f, 0.6f, 0.65f));
             var ipNames = new string[IpPresets.Length];
             var ipAddrs = new string[IpPresets.Length];
             for (int i = 0; i < IpPresets.Length; i++) { ipNames[i] = IpPresets[i].name; ipAddrs[i] = IpPresets[i].ip; }
@@ -318,6 +374,16 @@ namespace SemanticXR.UI
             _connectBtn = Mk.Btn(_connectPanel.transform, "Connect", new Vector2(0, -90), new Vector2(220, 50), new Color(0.15f, 0.55f, 0.25f), 24, OnConnect);
             _errorText = Mk.Label(_connectPanel.transform, "", new Vector2(0, -140), 15, new Color(1f, 0.4f, 0.4f));
 
+            // Skip-tutorial toggle, bottom-right of the Connect panel. Defaults
+            // to "Skip tutorial" (i.e., tutorial is currently ON). The state
+            // resets every time the Connect panel is shown — see ShowConnect().
+            // y=-170 sits just below the error-text band (y=[-158, -122]) and
+            // within the panel's drawable y∈[-180, +180].
+            _skipTutorialBtn = Mk.Btn(_connectPanel.transform, "Skip tutorial",
+                new Vector2(220, -170), new Vector2(130, 22),
+                new Color(0.25f, 0.25f, 0.32f), 12, ToggleSkipTutorial);
+            _skipTutorialLabel = _skipTutorialBtn.GetComponentInChildren<TextMeshProUGUI>();
+
             _streamingPanel = Mk.Panel(bg.transform, "Streaming", Color.clear);
             Mk.Stretch(_streamingPanel, 20);
 
@@ -347,6 +413,18 @@ namespace SemanticXR.UI
             _streamingPanel.SetActive(false);
 
             BuildMicOrb();
+
+            // Hand the coach-marks system its anchor points now that every
+            // panel/orb exists. CoachMarks builds its own canvases lazily here.
+            if (_coach != null)
+            {
+                _coach.SetTargets(
+                    connectPanel:   _connectPanel.transform,
+                    connectBtn:     _connectBtn.GetComponent<RectTransform>(),
+                    streamingPanel: _streamingPanel.transform,
+                    micOrb:         _micOrb.transform);
+                _coach.OnConnectPanelShown();
+            }
         }
 
         void BuildMicOrb()
@@ -368,19 +446,17 @@ namespace SemanticXR.UI
             _clearBtn = MakeOrbButton(_micOrb.transform, new Vector2(-115, 0),
                 clearColor, IconFactory.Trash, ClearPoints);
 
+            // Hold-to-talk: no onClick listener — the mic press is driven by
+            // TryHandleMicHold() polling OVRInput each frame and matching against
+            // the ray's current UI raycast hit. EventTrigger PointerDown/Up
+            // would be cleaner, but XRUIInputModule doesn't dispatch them in
+            // this project (no UI press input wired on the XRRayInteractor).
             _micBtn = MakeOrbButton(_micOrb.transform, Vector2.zero,
-                MicIdleColor, IconFactory.Mic, OnMicClicked);
+                MicIdleColor, IconFactory.Mic, null);
             _micBtnBg = _micBtn.GetComponent<Image>();
-            // Stop icon overlays the mic icon on the same button, toggled by listening state.
             _micIconGroup  = _micBtn.transform.Find("Icon").gameObject;
             _stopIconGroup = IconFactory.MakeIconChild(_micBtn.transform, "StopIcon", IconFactory.Stop);
             _stopIconGroup.SetActive(false);
-
-            var trig = _micBtn.gameObject.AddComponent<EventTrigger>();
-            AddTrigger(trig, EventTriggerType.PointerEnter, () => Debug.Log("[StreamingUI] pointer ENTER mic orb"));
-            AddTrigger(trig, EventTriggerType.PointerDown,  () => Debug.Log("[StreamingUI] pointer DOWN mic orb"));
-            AddTrigger(trig, EventTriggerType.PointerUp,    () => Debug.Log("[StreamingUI] pointer UP mic orb"));
-            AddTrigger(trig, EventTriggerType.PointerClick, () => Debug.Log("[StreamingUI] pointer CLICK mic orb"));
 
             MakeOrbButton(_micOrb.transform, new Vector2(115, 0),
                 disconnectColor, IconFactory.Power, () => _orchestrator.Disconnect());
@@ -467,6 +543,16 @@ namespace SemanticXR.UI
             _streamingPanel.SetActive(false);
             if (_micOrb != null) _micOrb.SetActive(false);
             Position();
+
+            // Tutorial defaults back to ON every time the Connect panel returns,
+            // so the next user (after a Disconnect) automatically gets the tour.
+            // Repeat users uncheck Skip during their own session.
+            if (_coach != null)
+            {
+                _coach.Enabled = true;
+                if (_skipTutorialLabel != null) _skipTutorialLabel.text = "Skip tutorial";
+                _coach.OnConnectPanelShown();
+            }
         }
 
         void ResetDictation()
@@ -492,25 +578,23 @@ namespace SemanticXR.UI
                 _audio.Configure(_ipAddress, audioPort);
             InitStreamingPanelPose();
             if (_micOrb != null) { _micOrb.SetActive(true); InitMicOrbPose(); }
+            _coach?.OnStreamingShown();
         }
         void ShowError(string msg) { _errorText.text = msg; _connectBtn.interactable = true; }
 
-        void OnMicClicked()
+        void ToggleSkipTutorial()
         {
-            Debug.Log($"[StreamingUI] mic clicked, listening={_audio.IsListening}");
-            StartCoroutine(FlashMicButton());
-            _audio.Toggle();
-        }
-
-        System.Collections.IEnumerator FlashMicButton()
-        {
-            if (_micBtnBg == null) yield break;
-            var original = _micBtnBg.color;
-            _micBtnBg.color = new Color(1f, 0.95f, 0.2f);  // bright yellow
-            yield return new WaitForSeconds(0.15f);
-            // If a listening-state change already re-colored it, don't stomp.
-            if (_micBtnBg.color.r > 0.9f && _micBtnBg.color.g > 0.9f)
-                _micBtnBg.color = original;
+            if (_coach == null) return;
+            _coach.Enabled = !_coach.Enabled;
+            if (_skipTutorialLabel != null)
+                _skipTutorialLabel.text = _coach.Enabled ? "Skip tutorial" : "Show tutorial";
+            // Re-show or hide S1 immediately so the toggle's effect is visible.
+            if (_connectPanel != null && _connectPanel.activeSelf)
+            {
+                if (_coach.Enabled) _coach.OnConnectPanelShown();
+                else _coach.HideAll();
+            }
+            Debug.Log($"[StreamingUI] Tutorial {(_coach.Enabled ? "ON" : "OFF")}");
         }
 
         static void AddTrigger(EventTrigger trig, EventTriggerType type, System.Action cb)
@@ -559,6 +643,7 @@ namespace SemanticXR.UI
             }
             if (_micIconGroup  != null) _micIconGroup.SetActive(!listening);
             if (_stopIconGroup != null) _stopIconGroup.SetActive(listening);
+            if (listening) _coach?.OnListeningStarted();
         }
 
         void OnDictationErrorReceived(string msg)
@@ -574,6 +659,17 @@ namespace SemanticXR.UI
             if (!_positioned && Camera.main != null) { Position(); _positioned = true; }
 
             TryHandleRecallButton();
+            TryHandleMicHold();
+
+            // Any trigger press dismisses the S3 popup. Fires before the
+            // XRInteractionSetup click is dispatched so a tap aimed at the
+            // mic orb both closes the popup AND starts recording the next take.
+            if (_coach != null &&
+                (OVRInput.GetDown(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.RTouch) ||
+                 OVRInput.GetDown(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.LTouch)))
+            {
+                _coach.OnAnyTriggerPress();
+            }
 
             // Step the shared body-forward once per frame, then let each body-locked
             // widget damp its own position using the new value. Keeps panel + orb

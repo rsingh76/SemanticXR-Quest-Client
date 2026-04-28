@@ -50,7 +50,7 @@ namespace SemanticXR.UI
             if (_listening) return;
             if (string.IsNullOrEmpty(_serverAddress))
             {
-                OnError?.Invoke("Server address not set — connect first");
+                OnError?.Invoke("System address not set — connect first");
                 return;
             }
 
@@ -294,7 +294,7 @@ namespace SemanticXR.UI
                     await call.RequestStream.CompleteAsync();
                     var response = await call.ResponseAsync;
 
-                    string statusMsg = $"Sent. Server returned {response.NumPointClouds} point clouds.";
+                    string statusMsg = $"Sent. System returned {response.NumPointClouds} point clouds.";
                     Debug.Log($"[Audio] {statusMsg}");
                     OnStatus?.Invoke(statusMsg);
                     OnPointClouds?.Invoke(response);

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using XrVis;
@@ -41,6 +42,12 @@ namespace SemanticXR.UI
                  "alpha at centre roughly doubles. OFF = single layer, much more translucent " +
                  "for the same alpha value.")]
         [SerializeField] bool doubleSided = true;
+
+        // Fires the first time AddResponse renders ≥1 cluster after every
+        // session start (session = creation OR most-recent Clear). Used by the
+        // tutorial coach marks to show the color-confidence popup once.
+        public event Action OnFirstClusterRendered;
+        bool _firedFirstCluster;
 
         // One batch per query response, so Clear() can wipe everything in one
         // sweep and the accumulate behaviour is obvious.
@@ -124,6 +131,11 @@ namespace SemanticXR.UI
 
             _batches.Add(batch);
             Debug.Log($"[PointCloudVisualizer] Added {objectCount} clusters, {pointTotal} points; total now {TotalPointCount}");
+            if (!_firedFirstCluster && batch.Count > 0)
+            {
+                _firedFirstCluster = true;
+                OnFirstClusterRendered?.Invoke();
+            }
             return (objectCount, pointTotal);
         }
 
@@ -141,6 +153,7 @@ namespace SemanticXR.UI
                     }
             _batches.Clear();
             _centroids.Clear();
+            _firedFirstCluster = false;
         }
 
         void OnDestroy() => Clear();
