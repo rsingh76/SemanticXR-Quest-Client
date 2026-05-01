@@ -33,41 +33,44 @@ namespace Xr {
             "ASgCEg8KB3Bvc2UxXzMYCCABKAISDwoHcG9zZTJfMBgJIAEoAhIPCgdwb3Nl",
             "Ml8xGAogASgCEg8KB3Bvc2UyXzIYCyABKAISDwoHcG9zZTJfMxgMIAEoAhIP",
             "Cgdwb3NlM18wGA0gASgCEg8KB3Bvc2UzXzEYDiABKAISDwoHcG9zZTNfMhgP",
-            "IAEoAhIPCgdwb3NlM18zGBAgASgCInMKE1Vwc3RyZWFtU3luY01lc3NhZ2US",
-            "HQoFaW1hZ2UYASABKAsyDi54ci5WaWRlb0ZyYW1lEhQKCGRlcHRoQXJyGAIg",
-            "AygCQgIQARIaCgRwb3NlGAMgASgLMgwueHIuUG9zZURhdGESCwoDZnBzGAQg",
-            "ASgFIpgBChtVcHN0cmVhbVN5bmNNZXNzYWdlX2RhdGFzZXQSHQoFaW1hZ2UY",
-            "ASABKAsyDi54ci5WaWRlb0ZyYW1lEg0KBWRlcHRoGAIgASgMEhAKBHBvc2UY",
-            "AyADKAJCAhABEgsKA2ZwcxgEIAEoBRIWCg5zY2FsaW5nX2ZhY3RvchgFIAEo",
-            "BRIUCgx0aW1lc3RhbXBfbnMYBiABKAMiQgoQQ2FtZXJhSW50cmluc2ljcxIK",
-            "CgJmeBgBIAEoAhIKCgJmeRgCIAEoAhIKCgJjeBgDIAEoAhIKCgJjeRgEIAEo",
-            "AiL7AwoZVXBzdHJlYW1TeW5jTWVzc2FnZV9xdWVzdBIdCgVpbWFnZRgBIAEo",
-            "CzIOLnhyLlZpZGVvRnJhbWUSDQoFZGVwdGgYAiABKAwSEAoEcG9zZRgDIAMo",
-            "AkICEAESKAoKaW50cmluc2ljcxgEIAEoCzIULnhyLkNhbWVyYUludHJpbnNp",
-            "Y3MSEwoLaW1hZ2Vfd2lkdGgYBSABKAUSFAoMaW1hZ2VfaGVpZ2h0GAYgASgF",
-            "EhMKC2RlcHRoX3dpZHRoGAcgASgFEhQKDGRlcHRoX2hlaWdodBgIIAEoBRIL",
-            "CgNmcHMYCSABKAUSFAoMdGltZXN0YW1wX25zGAogASgDEhQKDGRlcHRoX25l",
-            "YXJfehgLIAEoAhITCgtkZXB0aF9mYXJfehgMIAEoAhIuChBkZXB0aF9pbnRy",
-            "aW5zaWNzGA0gASgLMhQueHIuQ2FtZXJhSW50cmluc2ljcxIWCgpkZXB0aF9w",
-            "b3NlGA4gAygCQgIQARIYChByZ2JfdGltZXN0YW1wX25zGA8gASgDEhoKEmRl",
-            "cHRoX3RpbWVzdGFtcF9ucxgQIAEoAxIVCgloZWFkX3Bvc2UYESADKAJCAhAB",
-            "EhsKD3JnYl9jYW1lcmFfcG9zZRgSIAMoAkICEAESHgoSZGVwdGhfZm92X3Rh",
-            "bmdlbnRzGBMgAygCQgIQATLwAQoJWHJTZXJ2aWNlElEKGVVwbG9hZFN5bmNN",
-            "ZXNzYWdlX2RhdGFzZXQSHy54ci5VcHN0cmVhbVN5bmNNZXNzYWdlX2RhdGFz",
-            "ZXQaDy54ci5WaWRlb1N0YXR1cyIAKAESQQoRVXBsb2FkU3luY01lc3NhZ2US",
-            "Fy54ci5VcHN0cmVhbVN5bmNNZXNzYWdlGg8ueHIuVmlkZW9TdGF0dXMiACgB",
-            "Ek0KF1VwbG9hZFN5bmNNZXNzYWdlX3F1ZXN0Eh0ueHIuVXBzdHJlYW1TeW5j",
-            "TWVzc2FnZV9xdWVzdBoPLnhyLlZpZGVvU3RhdHVzIgAoAWIGcHJvdG8z"));
+            "IAEoAhIPCgdwb3NlM18zGBAgASgCIqABChNVcHN0cmVhbVN5bmNNZXNzYWdl",
+            "Eh0KBWltYWdlGAEgASgLMg4ueHIuVmlkZW9GcmFtZRIUCghkZXB0aEFychgC",
+            "IAMoAkICEAESGgoEcG9zZRgDIAEoCzIMLnhyLlBvc2VEYXRhEgsKA2ZwcxgE",
+            "IAEoBRITCgttYXhfZGVwdGhfbRgFIAEoAhIWCg5kZXB0aF9kaXNhYmxlZBgG",
+            "IAEoCCLFAQobVXBzdHJlYW1TeW5jTWVzc2FnZV9kYXRhc2V0Eh0KBWltYWdl",
+            "GAEgASgLMg4ueHIuVmlkZW9GcmFtZRINCgVkZXB0aBgCIAEoDBIQCgRwb3Nl",
+            "GAMgAygCQgIQARILCgNmcHMYBCABKAUSFgoOc2NhbGluZ19mYWN0b3IYBSAB",
+            "KAUSFAoMdGltZXN0YW1wX25zGAYgASgDEhMKC21heF9kZXB0aF9tGAcgASgC",
+            "EhYKDmRlcHRoX2Rpc2FibGVkGAggASgIIkIKEENhbWVyYUludHJpbnNpY3MS",
+            "CgoCZngYASABKAISCgoCZnkYAiABKAISCgoCY3gYAyABKAISCgoCY3kYBCAB",
+            "KAIiqAQKGVVwc3RyZWFtU3luY01lc3NhZ2VfcXVlc3QSHQoFaW1hZ2UYASAB",
+            "KAsyDi54ci5WaWRlb0ZyYW1lEg0KBWRlcHRoGAIgASgMEhAKBHBvc2UYAyAD",
+            "KAJCAhABEigKCmludHJpbnNpY3MYBCABKAsyFC54ci5DYW1lcmFJbnRyaW5z",
+            "aWNzEhMKC2ltYWdlX3dpZHRoGAUgASgFEhQKDGltYWdlX2hlaWdodBgGIAEo",
+            "BRITCgtkZXB0aF93aWR0aBgHIAEoBRIUCgxkZXB0aF9oZWlnaHQYCCABKAUS",
+            "CwoDZnBzGAkgASgFEhQKDHRpbWVzdGFtcF9ucxgKIAEoAxIUCgxkZXB0aF9u",
+            "ZWFyX3oYCyABKAISEwoLZGVwdGhfZmFyX3oYDCABKAISLgoQZGVwdGhfaW50",
+            "cmluc2ljcxgNIAEoCzIULnhyLkNhbWVyYUludHJpbnNpY3MSFgoKZGVwdGhf",
+            "cG9zZRgOIAMoAkICEAESGAoQcmdiX3RpbWVzdGFtcF9ucxgPIAEoAxIaChJk",
+            "ZXB0aF90aW1lc3RhbXBfbnMYECABKAMSFQoJaGVhZF9wb3NlGBEgAygCQgIQ",
+            "ARIbCg9yZ2JfY2FtZXJhX3Bvc2UYEiADKAJCAhABEh4KEmRlcHRoX2Zvdl90",
+            "YW5nZW50cxgTIAMoAkICEAESEwoLbWF4X2RlcHRoX20YFCABKAISFgoOZGVw",
+            "dGhfZGlzYWJsZWQYFSABKAgy8AEKCVhyU2VydmljZRJRChlVcGxvYWRTeW5j",
+            "TWVzc2FnZV9kYXRhc2V0Eh8ueHIuVXBzdHJlYW1TeW5jTWVzc2FnZV9kYXRh",
+            "c2V0Gg8ueHIuVmlkZW9TdGF0dXMiACgBEkEKEVVwbG9hZFN5bmNNZXNzYWdl",
+            "EhcueHIuVXBzdHJlYW1TeW5jTWVzc2FnZRoPLnhyLlZpZGVvU3RhdHVzIgAo",
+            "ARJNChdVcGxvYWRTeW5jTWVzc2FnZV9xdWVzdBIdLnhyLlVwc3RyZWFtU3lu",
+            "Y01lc3NhZ2VfcXVlc3QaDy54ci5WaWRlb1N0YXR1cyIAKAFiBnByb3RvMw=="));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { },
           new pbr::GeneratedClrTypeInfo(null, null, new pbr::GeneratedClrTypeInfo[] {
             new pbr::GeneratedClrTypeInfo(typeof(global::Xr.VideoFrame), global::Xr.VideoFrame.Parser, new[]{ "DataH265", "FrameNumber", "TimestampUs" }, new[]{ "Data" }, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::Xr.VideoStatus), global::Xr.VideoStatus.Parser, new[]{ "Success" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::Xr.PoseData), global::Xr.PoseData.Parser, new[]{ "Pose00", "Pose01", "Pose02", "Pose03", "Pose10", "Pose11", "Pose12", "Pose13", "Pose20", "Pose21", "Pose22", "Pose23", "Pose30", "Pose31", "Pose32", "Pose33" }, null, null, null, null),
-            new pbr::GeneratedClrTypeInfo(typeof(global::Xr.UpstreamSyncMessage), global::Xr.UpstreamSyncMessage.Parser, new[]{ "Image", "DepthArr", "Pose", "Fps" }, null, null, null, null),
-            new pbr::GeneratedClrTypeInfo(typeof(global::Xr.UpstreamSyncMessage_dataset), global::Xr.UpstreamSyncMessage_dataset.Parser, new[]{ "Image", "Depth", "Pose", "Fps", "ScalingFactor", "TimestampNs" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::Xr.UpstreamSyncMessage), global::Xr.UpstreamSyncMessage.Parser, new[]{ "Image", "DepthArr", "Pose", "Fps", "MaxDepthM", "DepthDisabled" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::Xr.UpstreamSyncMessage_dataset), global::Xr.UpstreamSyncMessage_dataset.Parser, new[]{ "Image", "Depth", "Pose", "Fps", "ScalingFactor", "TimestampNs", "MaxDepthM", "DepthDisabled" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::Xr.CameraIntrinsics), global::Xr.CameraIntrinsics.Parser, new[]{ "Fx", "Fy", "Cx", "Cy" }, null, null, null, null),
-            new pbr::GeneratedClrTypeInfo(typeof(global::Xr.UpstreamSyncMessage_quest), global::Xr.UpstreamSyncMessage_quest.Parser, new[]{ "Image", "Depth", "Pose", "Intrinsics", "ImageWidth", "ImageHeight", "DepthWidth", "DepthHeight", "Fps", "TimestampNs", "DepthNearZ", "DepthFarZ", "DepthIntrinsics", "DepthPose", "RgbTimestampNs", "DepthTimestampNs", "HeadPose", "RgbCameraPose", "DepthFovTangents" }, null, null, null, null)
+            new pbr::GeneratedClrTypeInfo(typeof(global::Xr.UpstreamSyncMessage_quest), global::Xr.UpstreamSyncMessage_quest.Parser, new[]{ "Image", "Depth", "Pose", "Intrinsics", "ImageWidth", "ImageHeight", "DepthWidth", "DepthHeight", "Fps", "TimestampNs", "DepthNearZ", "DepthFarZ", "DepthIntrinsics", "DepthPose", "RgbTimestampNs", "DepthTimestampNs", "HeadPose", "RgbCameraPose", "DepthFovTangents", "MaxDepthM", "DepthDisabled" }, null, null, null, null)
           }));
     }
     #endregion
@@ -1387,6 +1390,7 @@ namespace Xr {
       pose_ = other.pose_ != null ? other.pose_.Clone() : null;
       fps_ = other.fps_;
       maxDepthM_ = other.maxDepthM_;
+      depthDisabled_ = other.depthDisabled_;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -1446,9 +1450,37 @@ namespace Xr {
     /// <summary>Field number for the "max_depth_m" field.</summary>
     public const int MaxDepthMFieldNumber = 5;
     private float maxDepthM_;
+    /// <summary>
+    /// Per-session mapping depth cap (meters). 0.0 / unset = use server default
+    /// from config (model.mapping.max_depth_m); &lt;0 = explicit no-cap; >0 = cap
+    /// value in meters. Client is expected to stamp the same value on every
+    /// frame in a session (server logs it once on session start / on change).
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public float MaxDepthM {
       get { return maxDepthM_; }
-      set { maxDepthM_ = value; }
+      set {
+        maxDepthM_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "depth_disabled" field.</summary>
+    public const int DepthDisabledFieldNumber = 6;
+    private bool depthDisabled_;
+    /// <summary>
+    /// Per-session toggle for depth streaming. proto3 default (false) means depth
+    /// is enabled — preserves backward compatibility with clients that don't set
+    /// this field. When true, the client is sending no depth data this session
+    /// and `depthArr` is empty; server should skip any depth-dependent processing.
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public bool DepthDisabled {
+      get { return depthDisabled_; }
+      set {
+        depthDisabled_ = value;
+      }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -1471,6 +1503,7 @@ namespace Xr {
       if (!object.Equals(Pose, other.Pose)) return false;
       if (Fps != other.Fps) return false;
       if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(MaxDepthM, other.MaxDepthM)) return false;
+      if (DepthDisabled != other.DepthDisabled) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -1483,6 +1516,7 @@ namespace Xr {
       if (pose_ != null) hash ^= Pose.GetHashCode();
       if (Fps != 0) hash ^= Fps.GetHashCode();
       if (MaxDepthM != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(MaxDepthM);
+      if (DepthDisabled != false) hash ^= DepthDisabled.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -1518,6 +1552,10 @@ namespace Xr {
         output.WriteRawTag(45);
         output.WriteFloat(MaxDepthM);
       }
+      if (DepthDisabled != false) {
+        output.WriteRawTag(48);
+        output.WriteBool(DepthDisabled);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -1545,6 +1583,10 @@ namespace Xr {
         output.WriteRawTag(45);
         output.WriteFloat(MaxDepthM);
       }
+      if (DepthDisabled != false) {
+        output.WriteRawTag(48);
+        output.WriteBool(DepthDisabled);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(ref output);
       }
@@ -1567,6 +1609,9 @@ namespace Xr {
       }
       if (MaxDepthM != 0F) {
         size += 1 + 4;
+      }
+      if (DepthDisabled != false) {
+        size += 1 + 1;
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -1598,6 +1643,9 @@ namespace Xr {
       }
       if (other.MaxDepthM != 0F) {
         MaxDepthM = other.MaxDepthM;
+      }
+      if (other.DepthDisabled != false) {
+        DepthDisabled = other.DepthDisabled;
       }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
@@ -1645,6 +1693,10 @@ namespace Xr {
             MaxDepthM = input.ReadFloat();
             break;
           }
+          case 48: {
+            DepthDisabled = input.ReadBool();
+            break;
+          }
         }
       }
     #endif
@@ -1689,6 +1741,10 @@ namespace Xr {
           }
           case 45: {
             MaxDepthM = input.ReadFloat();
+            break;
+          }
+          case 48: {
+            DepthDisabled = input.ReadBool();
             break;
           }
         }
@@ -1740,6 +1796,7 @@ namespace Xr {
       scalingFactor_ = other.scalingFactor_;
       timestampNs_ = other.timestampNs_;
       maxDepthM_ = other.maxDepthM_;
+      depthDisabled_ = other.depthDisabled_;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -1826,9 +1883,32 @@ namespace Xr {
     /// <summary>Field number for the "max_depth_m" field.</summary>
     public const int MaxDepthMFieldNumber = 7;
     private float maxDepthM_;
+    /// <summary>
+    /// See UpstreamSyncMessage.max_depth_m for semantics.
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public float MaxDepthM {
       get { return maxDepthM_; }
-      set { maxDepthM_ = value; }
+      set {
+        maxDepthM_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "depth_disabled" field.</summary>
+    public const int DepthDisabledFieldNumber = 8;
+    private bool depthDisabled_;
+    /// <summary>
+    /// See UpstreamSyncMessage.depth_disabled for semantics. When true, the
+    /// client is sending no depth this session and `depth` is empty.
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public bool DepthDisabled {
+      get { return depthDisabled_; }
+      set {
+        depthDisabled_ = value;
+      }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -1853,6 +1933,7 @@ namespace Xr {
       if (ScalingFactor != other.ScalingFactor) return false;
       if (TimestampNs != other.TimestampNs) return false;
       if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(MaxDepthM, other.MaxDepthM)) return false;
+      if (DepthDisabled != other.DepthDisabled) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -1867,6 +1948,7 @@ namespace Xr {
       if (ScalingFactor != 0) hash ^= ScalingFactor.GetHashCode();
       if (TimestampNs != 0L) hash ^= TimestampNs.GetHashCode();
       if (MaxDepthM != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(MaxDepthM);
+      if (DepthDisabled != false) hash ^= DepthDisabled.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -1910,6 +1992,10 @@ namespace Xr {
         output.WriteRawTag(61);
         output.WriteFloat(MaxDepthM);
       }
+      if (DepthDisabled != false) {
+        output.WriteRawTag(64);
+        output.WriteBool(DepthDisabled);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -1945,6 +2031,10 @@ namespace Xr {
         output.WriteRawTag(61);
         output.WriteFloat(MaxDepthM);
       }
+      if (DepthDisabled != false) {
+        output.WriteRawTag(64);
+        output.WriteBool(DepthDisabled);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(ref output);
       }
@@ -1973,6 +2063,9 @@ namespace Xr {
       }
       if (MaxDepthM != 0F) {
         size += 1 + 4;
+      }
+      if (DepthDisabled != false) {
+        size += 1 + 1;
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -2007,6 +2100,9 @@ namespace Xr {
       }
       if (other.MaxDepthM != 0F) {
         MaxDepthM = other.MaxDepthM;
+      }
+      if (other.DepthDisabled != false) {
+        DepthDisabled = other.DepthDisabled;
       }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
@@ -2059,6 +2155,10 @@ namespace Xr {
             MaxDepthM = input.ReadFloat();
             break;
           }
+          case 64: {
+            DepthDisabled = input.ReadBool();
+            break;
+          }
         }
       }
     #endif
@@ -2108,6 +2208,10 @@ namespace Xr {
           }
           case 61: {
             MaxDepthM = input.ReadFloat();
+            break;
+          }
+          case 64: {
+            DepthDisabled = input.ReadBool();
             break;
           }
         }
@@ -2481,6 +2585,7 @@ namespace Xr {
       rgbCameraPose_ = other.rgbCameraPose_.Clone();
       depthFovTangents_ = other.depthFovTangents_.Clone();
       maxDepthM_ = other.maxDepthM_;
+      depthDisabled_ = other.depthDisabled_;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -2762,12 +2867,33 @@ namespace Xr {
     public const int MaxDepthMFieldNumber = 20;
     private float maxDepthM_;
     /// <summary>
-    /// Per-session far-depth cap. 0.0 = use server YAML default, negative =
-    /// no cap, positive = cap in meters. See proto comment.
+    /// See UpstreamSyncMessage.max_depth_m for semantics.
     /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public float MaxDepthM {
       get { return maxDepthM_; }
-      set { maxDepthM_ = value; }
+      set {
+        maxDepthM_ = value;
+      }
+    }
+
+    /// <summary>Field number for the "depth_disabled" field.</summary>
+    public const int DepthDisabledFieldNumber = 21;
+    private bool depthDisabled_;
+    /// <summary>
+    /// See UpstreamSyncMessage.depth_disabled for semantics. When true, the
+    /// client is sending no depth this session and `depth`, `depth_intrinsics`,
+    /// `depth_pose`, `depth_fov_tangents`, `depth_width`, `depth_height`,
+    /// `depth_near_z`, `depth_far_z`, `depth_timestamp_ns` are all unset / 0.
+    /// </summary>
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public bool DepthDisabled {
+      get { return depthDisabled_; }
+      set {
+        depthDisabled_ = value;
+      }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -2805,6 +2931,7 @@ namespace Xr {
       if(!rgbCameraPose_.Equals(other.rgbCameraPose_)) return false;
       if(!depthFovTangents_.Equals(other.depthFovTangents_)) return false;
       if (!pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.Equals(MaxDepthM, other.MaxDepthM)) return false;
+      if (DepthDisabled != other.DepthDisabled) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -2832,6 +2959,7 @@ namespace Xr {
       hash ^= rgbCameraPose_.GetHashCode();
       hash ^= depthFovTangents_.GetHashCode();
       if (MaxDepthM != 0F) hash ^= pbc::ProtobufEqualityComparers.BitwiseSingleEqualityComparer.GetHashCode(MaxDepthM);
+      if (DepthDisabled != false) hash ^= DepthDisabled.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -2915,6 +3043,10 @@ namespace Xr {
         output.WriteRawTag(165, 1);
         output.WriteFloat(MaxDepthM);
       }
+      if (DepthDisabled != false) {
+        output.WriteRawTag(168, 1);
+        output.WriteBool(DepthDisabled);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -2990,6 +3122,10 @@ namespace Xr {
         output.WriteRawTag(165, 1);
         output.WriteFloat(MaxDepthM);
       }
+      if (DepthDisabled != false) {
+        output.WriteRawTag(168, 1);
+        output.WriteBool(DepthDisabled);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(ref output);
       }
@@ -3048,7 +3184,10 @@ namespace Xr {
       size += rgbCameraPose_.CalculateSize(_repeated_rgbCameraPose_codec);
       size += depthFovTangents_.CalculateSize(_repeated_depthFovTangents_codec);
       if (MaxDepthM != 0F) {
-        size += 2 + 4;   // 2-byte tag (field 20, wire 5) + IEEE-754 float
+        size += 2 + 4;
+      }
+      if (DepthDisabled != false) {
+        size += 2 + 1;
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -3120,6 +3259,9 @@ namespace Xr {
       depthFovTangents_.Add(other.depthFovTangents_);
       if (other.MaxDepthM != 0F) {
         MaxDepthM = other.MaxDepthM;
+      }
+      if (other.DepthDisabled != false) {
+        DepthDisabled = other.DepthDisabled;
       }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
@@ -3234,6 +3376,10 @@ namespace Xr {
             MaxDepthM = input.ReadFloat();
             break;
           }
+          case 168: {
+            DepthDisabled = input.ReadBool();
+            break;
+          }
         }
       }
     #endif
@@ -3345,6 +3491,10 @@ namespace Xr {
           }
           case 165: {
             MaxDepthM = input.ReadFloat();
+            break;
+          }
+          case 168: {
+            DepthDisabled = input.ReadBool();
             break;
           }
         }

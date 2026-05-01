@@ -33,6 +33,9 @@ namespace SemanticXR.Streaming
         // so mid-session changes are no-ops rather than producing inconsistent
         // geometry. See proto comment on UpstreamSyncMessage_quest.max_depth_m.
         readonly float _maxDepthM;
+        // Per-session depth-streaming toggle. When true, no depth bytes/intrinsics/
+        // pose are sent and `depth_disabled = true` is stamped on every frame.
+        readonly bool _depthDisabled;
 
         readonly ConcurrentQueue<FrameData> _sendQueue = new();
         Thread _sendThread;
@@ -60,12 +63,13 @@ namespace SemanticXR.Streaming
             get { var e = _lastError; _lastError = null; return e; }
         }
 
-        public GrpcFramesClient(string address, int port, int fps, float maxDepthM)
+        public GrpcFramesClient(string address, int port, int fps, float maxDepthM, bool depthDisabled)
         {
-            _address    = address;
-            _port       = port;
-            _fps        = fps;
-            _maxDepthM  = float.IsNaN(maxDepthM) || float.IsInfinity(maxDepthM) ? 0f : maxDepthM;
+            _address       = address;
+            _port          = port;
+            _fps           = fps;
+            _maxDepthM     = float.IsNaN(maxDepthM) || float.IsInfinity(maxDepthM) ? 0f : maxDepthM;
+            _depthDisabled = depthDisabled;
         }
 
         public void Start()
@@ -168,18 +172,22 @@ namespace SemanticXR.Streaming
                     FrameNumber = f.FrameNumber,
                     TimestampUs = f.TimestampNs / 1000,
                 },
-                Depth            = ByteString.CopyFrom(f.DepthBytes ?? Array.Empty<byte>()),
+                // Depth fields are zeroed when streaming is disabled so we don't
+                // burn bandwidth or mislead the server with stale pose/intrinsics.
+                Depth            = _depthDisabled ? ByteString.Empty
+                                                  : ByteString.CopyFrom(f.DepthBytes ?? Array.Empty<byte>()),
                 ImageWidth       = f.ImageWidth,
                 ImageHeight      = f.ImageHeight,
-                DepthWidth       = f.DepthWidth,
-                DepthHeight      = f.DepthHeight,
+                DepthWidth       = _depthDisabled ? 0 : f.DepthWidth,
+                DepthHeight      = _depthDisabled ? 0 : f.DepthHeight,
                 Fps              = _fps,
                 TimestampNs      = f.TimestampNs,
-                DepthNearZ       = f.DepthNearZ,
-                DepthFarZ        = f.DepthFarZ,
+                DepthNearZ       = _depthDisabled ? 0f : f.DepthNearZ,
+                DepthFarZ        = _depthDisabled ? 0f : f.DepthFarZ,
                 RgbTimestampNs   = f.RgbTimestampNs,
-                DepthTimestampNs = f.DepthTimestampNs,
+                DepthTimestampNs = _depthDisabled ? 0L : f.DepthTimestampNs,
                 MaxDepthM        = _maxDepthM,
+                DepthDisabled    = _depthDisabled,
             };
 
             static float[] LhToRh(Matrix4x4 m) => new[]
@@ -204,7 +212,7 @@ namespace SemanticXR.Streaming
                 };
             }
 
-            if (f.HasDepthIntrinsics)
+            if (f.HasDepthIntrinsics && !_depthDisabled)
             {
                 msg.DepthIntrinsics = new CameraIntrinsics
                 {

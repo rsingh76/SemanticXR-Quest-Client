@@ -59,21 +59,23 @@ class PoseData(_message.Message):
     def __init__(self, pose0_0: _Optional[float] = ..., pose0_1: _Optional[float] = ..., pose0_2: _Optional[float] = ..., pose0_3: _Optional[float] = ..., pose1_0: _Optional[float] = ..., pose1_1: _Optional[float] = ..., pose1_2: _Optional[float] = ..., pose1_3: _Optional[float] = ..., pose2_0: _Optional[float] = ..., pose2_1: _Optional[float] = ..., pose2_2: _Optional[float] = ..., pose2_3: _Optional[float] = ..., pose3_0: _Optional[float] = ..., pose3_1: _Optional[float] = ..., pose3_2: _Optional[float] = ..., pose3_3: _Optional[float] = ...) -> None: ...
 
 class UpstreamSyncMessage(_message.Message):
-    __slots__ = ("image", "depthArr", "pose", "fps", "max_depth_m")
+    __slots__ = ("image", "depthArr", "pose", "fps", "max_depth_m", "depth_disabled")
     IMAGE_FIELD_NUMBER: _ClassVar[int]
     DEPTHARR_FIELD_NUMBER: _ClassVar[int]
     POSE_FIELD_NUMBER: _ClassVar[int]
     FPS_FIELD_NUMBER: _ClassVar[int]
     MAX_DEPTH_M_FIELD_NUMBER: _ClassVar[int]
+    DEPTH_DISABLED_FIELD_NUMBER: _ClassVar[int]
     image: VideoFrame
     depthArr: _containers.RepeatedScalarFieldContainer[float]
     pose: PoseData
     fps: int
     max_depth_m: float
-    def __init__(self, image: _Optional[_Union[VideoFrame, _Mapping]] = ..., depthArr: _Optional[_Iterable[float]] = ..., pose: _Optional[_Union[PoseData, _Mapping]] = ..., fps: _Optional[int] = ..., max_depth_m: _Optional[float] = ...) -> None: ...
+    depth_disabled: bool
+    def __init__(self, image: _Optional[_Union[VideoFrame, _Mapping]] = ..., depthArr: _Optional[_Iterable[float]] = ..., pose: _Optional[_Union[PoseData, _Mapping]] = ..., fps: _Optional[int] = ..., max_depth_m: _Optional[float] = ..., depth_disabled: bool = ...) -> None: ...
 
 class UpstreamSyncMessage_dataset(_message.Message):
-    __slots__ = ("image", "depth", "pose", "fps", "scaling_factor", "timestamp_ns", "max_depth_m")
+    __slots__ = ("image", "depth", "pose", "fps", "scaling_factor", "timestamp_ns", "max_depth_m", "depth_disabled")
     IMAGE_FIELD_NUMBER: _ClassVar[int]
     DEPTH_FIELD_NUMBER: _ClassVar[int]
     POSE_FIELD_NUMBER: _ClassVar[int]
@@ -81,6 +83,7 @@ class UpstreamSyncMessage_dataset(_message.Message):
     SCALING_FACTOR_FIELD_NUMBER: _ClassVar[int]
     TIMESTAMP_NS_FIELD_NUMBER: _ClassVar[int]
     MAX_DEPTH_M_FIELD_NUMBER: _ClassVar[int]
+    DEPTH_DISABLED_FIELD_NUMBER: _ClassVar[int]
     image: VideoFrame
     depth: bytes
     pose: _containers.RepeatedScalarFieldContainer[float]
@@ -88,7 +91,8 @@ class UpstreamSyncMessage_dataset(_message.Message):
     scaling_factor: int
     timestamp_ns: int
     max_depth_m: float
-    def __init__(self, image: _Optional[_Union[VideoFrame, _Mapping]] = ..., depth: _Optional[bytes] = ..., pose: _Optional[_Iterable[float]] = ..., fps: _Optional[int] = ..., scaling_factor: _Optional[int] = ..., timestamp_ns: _Optional[int] = ..., max_depth_m: _Optional[float] = ...) -> None: ...
+    depth_disabled: bool
+    def __init__(self, image: _Optional[_Union[VideoFrame, _Mapping]] = ..., depth: _Optional[bytes] = ..., pose: _Optional[_Iterable[float]] = ..., fps: _Optional[int] = ..., scaling_factor: _Optional[int] = ..., timestamp_ns: _Optional[int] = ..., max_depth_m: _Optional[float] = ..., depth_disabled: bool = ...) -> None: ...
 
 class CameraIntrinsics(_message.Message):
     __slots__ = ("fx", "fy", "cx", "cy")
@@ -103,7 +107,7 @@ class CameraIntrinsics(_message.Message):
     def __init__(self, fx: _Optional[float] = ..., fy: _Optional[float] = ..., cx: _Optional[float] = ..., cy: _Optional[float] = ...) -> None: ...
 
 class UpstreamSyncMessage_quest(_message.Message):
-    __slots__ = ("image", "depth", "pose", "intrinsics", "image_width", "image_height", "depth_width", "depth_height", "fps", "timestamp_ns", "depth_near_z", "depth_far_z", "depth_intrinsics", "depth_pose", "rgb_timestamp_ns", "depth_timestamp_ns", "head_pose", "rgb_camera_pose", "depth_fov_tangents", "max_depth_m")
+    __slots__ = ("image", "depth", "pose", "intrinsics", "image_width", "image_height", "depth_width", "depth_height", "fps", "timestamp_ns", "depth_near_z", "depth_far_z", "depth_intrinsics", "depth_pose", "rgb_timestamp_ns", "depth_timestamp_ns", "head_pose", "rgb_camera_pose", "depth_fov_tangents", "max_depth_m", "depth_disabled")
     IMAGE_FIELD_NUMBER: _ClassVar[int]
     DEPTH_FIELD_NUMBER: _ClassVar[int]
     POSE_FIELD_NUMBER: _ClassVar[int]
@@ -124,6 +128,7 @@ class UpstreamSyncMessage_quest(_message.Message):
     RGB_CAMERA_POSE_FIELD_NUMBER: _ClassVar[int]
     DEPTH_FOV_TANGENTS_FIELD_NUMBER: _ClassVar[int]
     MAX_DEPTH_M_FIELD_NUMBER: _ClassVar[int]
+    DEPTH_DISABLED_FIELD_NUMBER: _ClassVar[int]
     image: VideoFrame
     depth: bytes
     pose: _containers.RepeatedScalarFieldContainer[float]
@@ -144,4 +149,5 @@ class UpstreamSyncMessage_quest(_message.Message):
     rgb_camera_pose: _containers.RepeatedScalarFieldContainer[float]
     depth_fov_tangents: _containers.RepeatedScalarFieldContainer[float]
     max_depth_m: float
-    def __init__(self, image: _Optional[_Union[VideoFrame, _Mapping]] = ..., depth: _Optional[bytes] = ..., pose: _Optional[_Iterable[float]] = ..., intrinsics: _Optional[_Union[CameraIntrinsics, _Mapping]] = ..., image_width: _Optional[int] = ..., image_height: _Optional[int] = ..., depth_width: _Optional[int] = ..., depth_height: _Optional[int] = ..., fps: _Optional[int] = ..., timestamp_ns: _Optional[int] = ..., depth_near_z: _Optional[float] = ..., depth_far_z: _Optional[float] = ..., depth_intrinsics: _Optional[_Union[CameraIntrinsics, _Mapping]] = ..., depth_pose: _Optional[_Iterable[float]] = ..., rgb_timestamp_ns: _Optional[int] = ..., depth_timestamp_ns: _Optional[int] = ..., head_pose: _Optional[_Iterable[float]] = ..., rgb_camera_pose: _Optional[_Iterable[float]] = ..., depth_fov_tangents: _Optional[_Iterable[float]] = ..., max_depth_m: _Optional[float] = ...) -> None: ...
+    depth_disabled: bool
+    def __init__(self, image: _Optional[_Union[VideoFrame, _Mapping]] = ..., depth: _Optional[bytes] = ..., pose: _Optional[_Iterable[float]] = ..., intrinsics: _Optional[_Union[CameraIntrinsics, _Mapping]] = ..., image_width: _Optional[int] = ..., image_height: _Optional[int] = ..., depth_width: _Optional[int] = ..., depth_height: _Optional[int] = ..., fps: _Optional[int] = ..., timestamp_ns: _Optional[int] = ..., depth_near_z: _Optional[float] = ..., depth_far_z: _Optional[float] = ..., depth_intrinsics: _Optional[_Union[CameraIntrinsics, _Mapping]] = ..., depth_pose: _Optional[_Iterable[float]] = ..., rgb_timestamp_ns: _Optional[int] = ..., depth_timestamp_ns: _Optional[int] = ..., head_pose: _Optional[_Iterable[float]] = ..., rgb_camera_pose: _Optional[_Iterable[float]] = ..., depth_fov_tangents: _Optional[_Iterable[float]] = ..., max_depth_m: _Optional[float] = ..., depth_disabled: bool = ...) -> None: ...

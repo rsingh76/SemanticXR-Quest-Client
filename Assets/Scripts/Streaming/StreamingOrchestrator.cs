@@ -133,13 +133,22 @@ namespace SemanticXR.Streaming
         public event Action OnDisconnected;
         public event Action<string> OnError;
 
+        // Per-session toggle: when true, the GPU readback path is skipped to
+        // save power, the FrameData has no depth bytes, and the wire message
+        // stamps `depth_disabled = true`.
+        bool _depthDisabledSession;
+        public bool DepthDisabledSession => _depthDisabledSession;
+
         // maxDepthM: per-session far-depth cap stamped on every frame.
         //   0.0  → use server YAML default (the "did not specify" sentinel)
         //   <0   → explicit "no cap"
         //   >0   → cap value in meters
         // Server reads it once on the first frame of the upstream stream;
         // disconnect+reconnect to change it.
-        public void Connect(string address, int port, int fps, float maxDepthM)
+        // depthDisabled: when true, skip depth capture and stamp `depth_disabled`
+        // on every upstream frame. Likewise read once at connect — toggling at
+        // runtime requires disconnect+reconnect.
+        public void Connect(string address, int port, int fps, float maxDepthM, bool depthDisabled)
         {
             if (_tcp != null) return;
 
@@ -148,12 +157,13 @@ namespace SemanticXR.Streaming
             _encoderReady = false;
             _capturedCount = 0;
             _encoderOutCount = 0;
+            _depthDisabledSession = depthDisabled;
             ServerTarget = $"{address}:{port}";
 
             _tcp = transport == FramesTransport.Grpc
-                ? (IFramesClient)new GrpcFramesClient(address, port, fps, maxDepthM)
-                : new TcpProtoClient(address, port, fps, maxDepthM);
-            Debug.LogWarning($"[Orchestrator] Frames transport = {transport}, max_depth_m = {maxDepthM:F2}");
+                ? (IFramesClient)new GrpcFramesClient(address, port, fps, maxDepthM, depthDisabled)
+                : new TcpProtoClient(address, port, fps, maxDepthM, depthDisabled);
+            Debug.LogWarning($"[Orchestrator] Frames transport = {transport}, max_depth_m = {maxDepthM:F2}, depth_disabled = {depthDisabled}");
             _tcp.Start();
 
             OnConnected?.Invoke();
@@ -348,6 +358,126 @@ namespace SemanticXR.Streaming
             }
         }
 
+        // Snapshot of RGB + pose + intrinsics + timestamps at the call instant.
+        // Lives in this DTO so both the depth-on path (which packs it alongside
+        // a depth readback) and the depth-off path (which uses it directly) can
+        // share the same capture code.
+        struct RgbSnapshot
+        {
+            public byte[] Nv12;
+            public int Width, Height;
+            public float Fx, Fy, Cx, Cy;
+            public Matrix4x4 CameraPose;
+            public bool HasCameraPose;
+            public long TimestampNs;
+            public bool HasRgb;
+        }
+
+        // Capture RGB + pose at this instant. Identical to the inline block that
+        // used to live at the top of TryReadbackDepth — extracted so the no-depth
+        // path can call it without spinning up any GPU readback.
+        RgbSnapshot CaptureRgbSnapshot()
+        {
+            var s = new RgbSnapshot { CameraPose = Matrix4x4.identity };
+            double rgbStart = Time.realtimeSinceStartupAsDouble;
+            try
+            {
+                if (_cam != null && _cam.IsPlaying)
+                {
+                    var res = _cam.CurrentResolution;
+                    if (res.x > 0 && res.y > 0)
+                    {
+                        try
+                        {
+                            long tsBeforeReadback = 0;
+                            if (_camTimestampNsField != null)
+                            {
+                                try { tsBeforeReadback = (long)_camTimestampNsField.GetValue(_cam); }
+                                catch { }
+                            }
+
+                            var colors = _cam.GetColors();
+                            if (colors.IsCreated && colors.Length > 0)
+                            {
+                                s.Width  = res.x;
+                                s.Height = res.y;
+                                double nv12Start = Time.realtimeSinceStartupAsDouble;
+                                s.Nv12 = RgbaToNv12(colors, s.Width, s.Height);
+                                _tNv12 += (Time.realtimeSinceStartupAsDouble - nv12Start) * 1000.0;
+                                s.HasRgb = true;
+
+                                var intr = _cam.Intrinsics;
+                                if (intr.FocalLength.x > 0)
+                                {
+                                    var sensorRes = (Vector2)intr.SensorResolution;
+                                    var currentRes = (Vector2)res;
+                                    var scaleFactor = currentRes / sensorRes;
+                                    scaleFactor /= Mathf.Max(scaleFactor.x, scaleFactor.y);
+                                    var cropX = sensorRes.x * (1f - scaleFactor.x) * 0.5f;
+                                    var cropY = sensorRes.y * (1f - scaleFactor.y) * 0.5f;
+                                    var cropW = sensorRes.x * scaleFactor.x;
+                                    var cropH = sensorRes.y * scaleFactor.y;
+
+                                    s.Fx = intr.FocalLength.x * currentRes.x / cropW;
+                                    s.Fy = intr.FocalLength.y * currentRes.y / cropH;
+                                    s.Cx = (intr.PrincipalPoint.x - cropX) / cropW * currentRes.x;
+                                    s.Cy = (intr.PrincipalPoint.y - cropY) / cropH * currentRes.y;
+                                }
+
+                                if (_camTimestampNsField != null)
+                                {
+                                    try
+                                    {
+                                        s.TimestampNs = (long)_camTimestampNsField.GetValue(_cam);
+                                        if (tsBeforeReadback != 0 && s.TimestampNs != tsBeforeReadback)
+                                        {
+                                            Debug.LogError($"[SYNC] Timestamp changed during GetColors()! " +
+                                                $"before={tsBeforeReadback} after={s.TimestampNs} — frame dropped");
+                                            s.HasRgb = false;
+                                        }
+                                    }
+                                    catch { }
+                                }
+
+                                if (s.TimestampNs > 0 && TryGetPoseAtImageTimestamp(s.TimestampNs, out var pose))
+                                {
+                                    s.CameraPose = Matrix4x4.TRS(pose.position, pose.rotation, Vector3.one);
+                                    s.HasCameraPose = true;
+                                }
+                            }
+                        }
+                        catch { /* passthrough not ready yet */ }
+                    }
+                }
+            }
+            finally
+            {
+                _tRgb += (Time.realtimeSinceStartupAsDouble - rgbStart) * 1000.0;
+            }
+            return s;
+        }
+
+        // Depth-off capture path: pack the RGB snapshot into _latestCapture
+        // synchronously (no GPU readback, no callback delay). Mirrors the
+        // CoCapturedFrame fields the depth-on path sets, but with HasDepth = false.
+        void CaptureRgbOnly()
+        {
+            var s = CaptureRgbSnapshot();
+            var headPose = Camera.main != null ? Camera.main.transform.localToWorldMatrix : Matrix4x4.identity;
+            _latestCapture = new CoCapturedFrame
+            {
+                RgbNv12 = s.Nv12,
+                RgbWidth = s.Width, RgbHeight = s.Height,
+                RgbFx = s.Fx, RgbFy = s.Fy, RgbCx = s.Cx, RgbCy = s.Cy,
+                RgbCameraPose = s.CameraPose,
+                HasRgbCameraPose = s.HasCameraPose,
+                RgbTimestampNs = s.TimestampNs,
+                HeadPose = headPose,
+                HasDepth = false,
+                HasRgb = s.HasRgb,
+            };
+        }
+
         void TryReadbackDepth()
         {
             if (_depthReadbackPending) return;
@@ -359,119 +489,14 @@ namespace SemanticXR.Streaming
             // The GPU readback captures the depth texture content at this moment.
             // We ALSO capture RGB, pose, intrinsics NOW so they all match.
 
-            // Capture RGB at this instant (before async readback)
-            byte[] rgbNv12 = null;
-            int rgbW = 0, rgbH = 0;
-            float rgbFx = 0, rgbFy = 0, rgbCx = 0, rgbCy = 0;
-            Matrix4x4 rgbCamPose = Matrix4x4.identity;
-            bool hasRgbCamPose = false;
-            long rgbTsNs = 0;
-            bool hasRgb = false;
-
-            // Timing: mark the start of the synchronous RGB phase
-            double rgbStart = Time.realtimeSinceStartupAsDouble;
-            if (_cam != null && _cam.IsPlaying)
-            {
-                var res = _cam.CurrentResolution;
-                if (res.x > 0 && res.y > 0)
-                {
-                    try
-                    {
-                        // --- Read timestamp BEFORE GetColors() ---
-                        // PassthroughCameraAccess.Update() sets both _texture and
-                        // _timestampNsMonotonic in the SAME call to CameraGetLatestImage().
-                        // Unity runs all Update() sequentially on one thread, so no other
-                        // Update() can interleave between our reads here. Reading the
-                        // timestamp before AND after GetColors() lets us verify no PCA
-                        // Update() snuck in between (which can't happen, but we check).
-                        long tsBeforeReadback = 0;
-                        if (_camTimestampNsField != null)
-                        {
-                            try { tsBeforeReadback = (long)_camTimestampNsField.GetValue(_cam); }
-                            catch { }
-                        }
-
-                        var colors = _cam.GetColors();
-                        if (colors.IsCreated && colors.Length > 0)
-                        {
-                            rgbW = res.x;
-                            rgbH = res.y;
-                            double nv12Start = Time.realtimeSinceStartupAsDouble;
-                            rgbNv12 = RgbaToNv12(colors, rgbW, rgbH);
-                            _tNv12 += (Time.realtimeSinceStartupAsDouble - nv12Start) * 1000.0;
-                            hasRgb = true;
-
-                            var intr = _cam.Intrinsics;
-                            if (intr.FocalLength.x > 0)
-                            {
-                                // Convert intrinsics from SENSOR space to IMAGE space.
-                                // PrincipalPoint and FocalLength are in full-sensor pixel coords,
-                                // but GetColors() returns a cropped/scaled region (CurrentResolution).
-                                // Must apply the same CalcSensorCropRegion transform that
-                                // ViewportPointToRay uses internally (see PassthroughCameraAccess.cs:546).
-                                var sensorRes = (Vector2)intr.SensorResolution;
-                                var currentRes = (Vector2)res;
-                                var scaleFactor = currentRes / sensorRes;
-                                scaleFactor /= Mathf.Max(scaleFactor.x, scaleFactor.y);
-                                var cropX = sensorRes.x * (1f - scaleFactor.x) * 0.5f;
-                                var cropY = sensorRes.y * (1f - scaleFactor.y) * 0.5f;
-                                var cropW = sensorRes.x * scaleFactor.x;
-                                var cropH = sensorRes.y * scaleFactor.y;
-
-                                // Map sensor-space intrinsics to image-space
-                                rgbFx = intr.FocalLength.x * currentRes.x / cropW;
-                                rgbFy = intr.FocalLength.y * currentRes.y / cropH;
-                                rgbCx = (intr.PrincipalPoint.x - cropX) / cropW * currentRes.x;
-                                rgbCy = (intr.PrincipalPoint.y - cropY) / cropH * currentRes.y;
-
-                                if (_capturedCount <= 3)
-                                    Debug.LogWarning($"[Intrinsics] sensor={intr.SensorResolution} current={res} " +
-                                        $"crop=({cropX:F1},{cropY:F1},{cropW:F1},{cropH:F1}) " +
-                                        $"raw: fx={intr.FocalLength.x:F1} cx={intr.PrincipalPoint.x:F1} cy={intr.PrincipalPoint.y:F1} " +
-                                        $"adjusted: fx={rgbFx:F1} cx={rgbCx:F1} cy={rgbCy:F1}");
-                            }
-
-                            // RGB capture timestamp — read again and verify it matches
-                            // the pre-readback value (proves no PCA.Update() ran in between)
-                            if (_camTimestampNsField != null)
-                            {
-                                try
-                                {
-                                    rgbTsNs = (long)_camTimestampNsField.GetValue(_cam);
-                                    if (tsBeforeReadback != 0 && rgbTsNs != tsBeforeReadback)
-                                    {
-                                        // This should never happen (single-threaded Update),
-                                        // but if it does, the pixels and timestamp don't match
-                                        Debug.LogError($"[SYNC] Timestamp changed during GetColors()! " +
-                                            $"before={tsBeforeReadback} after={rgbTsNs} — frame dropped");
-                                        hasRgb = false;
-                                    }
-                                }
-                                catch { }
-                            }
-
-                            // Physical RGB sensor pose with lens offset (Unity world space).
-                            //
-                            // The image and _timestampNsMonotonic come from a SINGLE native call
-                            // (CameraGetLatestImage in PassthroughCameraAccess.Update).
-                            // We query the pose at that exact timestamp — this is the ONLY way
-                            // Meta's API provides pose+image sync (there is no atomic API
-                            // that returns both). The timestamp IS the sync mechanism.
-                            //
-                            // We use the native GetHeadsetPoseAtTime(long ns) which takes
-                            // nanoseconds directly (zero precision loss), NOT Meta's
-                            // GetCameraPose() which converts to float32 first (lossy).
-                            if (rgbTsNs > 0 && TryGetPoseAtImageTimestamp(rgbTsNs, out var pose))
-                            {
-                                rgbCamPose = Matrix4x4.TRS(pose.position, pose.rotation, Vector3.one);
-                                hasRgbCamPose = true;
-                            }
-                        }
-                    }
-                    catch { /* passthrough not ready yet */ }
-                }
-            }
-            _tRgb += (Time.realtimeSinceStartupAsDouble - rgbStart) * 1000.0;
+            var rgb = CaptureRgbSnapshot();
+            byte[] rgbNv12 = rgb.Nv12;
+            int rgbW = rgb.Width, rgbH = rgb.Height;
+            float rgbFx = rgb.Fx, rgbFy = rgb.Fy, rgbCx = rgb.Cx, rgbCy = rgb.Cy;
+            Matrix4x4 rgbCamPose = rgb.CameraPose;
+            bool hasRgbCamPose = rgb.HasCameraPose;
+            long rgbTsNs = rgb.TimestampNs;
+            bool hasRgb = rgb.HasRgb;
 
             _depthReadbackPending = true;
             double depthReqStart = Time.realtimeSinceStartupAsDouble;
@@ -779,7 +804,10 @@ namespace SemanticXR.Streaming
             if (_lastLoopTime > 0) _loopIntervalSum += (nowReal - _lastLoopTime) * 1000.0;
             _lastLoopTime = nowReal;
 
-            TryReadbackDepth();
+            if (_depthDisabledSession)
+                CaptureRgbOnly();
+            else
+                TryReadbackDepth();
             CaptureFrame();
             ForwardEncoded();
 
@@ -819,8 +847,10 @@ namespace SemanticXR.Streaming
             var c = _latestCapture;
 
             // --- Strict gating: every field needed for RGB-D reconstruction must be present ---
+            // Depth gate is skipped in depth-disabled sessions — the RGB-only
+            // capture path never sets HasDepth.
 
-            if (!c.HasDepth)  { _droppedNoDepth++; return; }
+            if (!_depthDisabledSession && !c.HasDepth) { _droppedNoDepth++; return; }
             if (!c.HasRgb)    { _droppedNoRgb++; return; }
 
             // Pose MUST come from the image timestamp path (not Camera.main)

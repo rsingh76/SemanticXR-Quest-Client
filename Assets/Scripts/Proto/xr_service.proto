@@ -46,12 +46,18 @@ message UpstreamSyncMessage {
   repeated float depthArr = 2 [packed=true];
   PoseData pose = 3;
   int32 fps = 4;
-  // Per-session far-depth cap, read once on the first frame of a stream:
-  //   0.0 / unset → "client did not specify"; server uses YAML default
-  //   negative   → explicit "no cap"; far-depth filter disabled
-  //   positive   → cap value in meters
-  // Stamp the same value on every frame; the server ignores changes mid-session.
+
+  // Per-session mapping depth cap (meters). 0.0 / unset = use server default
+  // from config (model.mapping.max_depth_m); <0 = explicit no-cap; >0 = cap
+  // value in meters. Client is expected to stamp the same value on every
+  // frame in a session (server logs it once on session start / on change).
   float max_depth_m = 5;
+
+  // Per-session toggle for depth streaming. proto3 default (false) means depth
+  // is enabled — preserves backward compatibility with clients that don't set
+  // this field. When true, the client is sending no depth data this session
+  // and `depthArr` is empty; server should skip any depth-dependent processing.
+  bool depth_disabled = 6;
 }
 
 message UpstreamSyncMessage_dataset {
@@ -62,8 +68,13 @@ message UpstreamSyncMessage_dataset {
   int32 fps = 4;
   int32 scaling_factor = 5;
   int64 timestamp_ns = 6;
-  // See UpstreamSyncMessage.max_depth_m comment.
+
+  // See UpstreamSyncMessage.max_depth_m for semantics.
   float max_depth_m = 7;
+
+  // See UpstreamSyncMessage.depth_disabled for semantics. When true, the
+  // client is sending no depth this session and `depth` is empty.
+  bool depth_disabled = 8;
 }
 
 message CameraIntrinsics {
@@ -114,12 +125,14 @@ message UpstreamSyncMessage_quest {
   // Storing both lets the server verify the conversion or use a non-pinhole model if desired.
   repeated float depth_fov_tangents = 19 [packed=true];
 
-  // Per-session far-depth cap, read once on the first frame of a stream:
-  //   0.0 / unset → "client did not specify"; server uses YAML default
-  //   negative   → explicit "no cap"; far-depth filter disabled
-  //   positive   → cap value in meters
-  // Stamp the same value on every frame; the server ignores changes mid-session.
+  // See UpstreamSyncMessage.max_depth_m for semantics.
   float max_depth_m = 20;
+
+  // See UpstreamSyncMessage.depth_disabled for semantics. When true, the
+  // client is sending no depth this session and `depth`, `depth_intrinsics`,
+  // `depth_pose`, `depth_fov_tangents`, `depth_width`, `depth_height`,
+  // `depth_near_z`, `depth_far_z`, `depth_timestamp_ns` are all unset / 0.
+  bool depth_disabled = 21;
 }
 
 service XrService {

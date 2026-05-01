@@ -572,7 +572,8 @@ namespace SemanticXR.UI
             _connectBtn.interactable = false;
             _errorText.text = "Connecting...";
             float maxDepthM = _connectSettings != null ? _connectSettings.WireValue : 0f;
-            _orchestrator.Connect(_ipAddress, port, _selectedFps, maxDepthM);
+            bool depthDisabled = _connectSettings != null && !_connectSettings.DepthEnabled;
+            _orchestrator.Connect(_ipAddress, port, _selectedFps, maxDepthM, depthDisabled);
         }
         void ShowConnect()
         {

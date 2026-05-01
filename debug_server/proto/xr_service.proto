@@ -52,6 +52,12 @@ message UpstreamSyncMessage {
   // value in meters. Client is expected to stamp the same value on every
   // frame in a session (server logs it once on session start / on change).
   float max_depth_m = 5;
+
+  // Per-session toggle for depth streaming. proto3 default (false) means depth
+  // is enabled — preserves backward compatibility with clients that don't set
+  // this field. When true, the client is sending no depth data this session
+  // and `depthArr` is empty; server should skip any depth-dependent processing.
+  bool depth_disabled = 6;
 }
 
 message UpstreamSyncMessage_dataset {
@@ -65,6 +71,10 @@ message UpstreamSyncMessage_dataset {
 
   // See UpstreamSyncMessage.max_depth_m for semantics.
   float max_depth_m = 7;
+
+  // See UpstreamSyncMessage.depth_disabled for semantics. When true, the
+  // client is sending no depth this session and `depth` is empty.
+  bool depth_disabled = 8;
 }
 
 message CameraIntrinsics {
@@ -117,6 +127,12 @@ message UpstreamSyncMessage_quest {
 
   // See UpstreamSyncMessage.max_depth_m for semantics.
   float max_depth_m = 20;
+
+  // See UpstreamSyncMessage.depth_disabled for semantics. When true, the
+  // client is sending no depth this session and `depth`, `depth_intrinsics`,
+  // `depth_pose`, `depth_fov_tangents`, `depth_width`, `depth_height`,
+  // `depth_near_z`, `depth_far_z`, `depth_timestamp_ns` are all unset / 0.
+  bool depth_disabled = 21;
 }
 
 service XrService {

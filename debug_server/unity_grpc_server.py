@@ -154,6 +154,10 @@ class FramesServicer(xr_service_pb2_grpc.XrServiceServicer):
                 if not intrinsics_written:
                     write_intrinsics_once(session_dir, msg)
                     intrinsics_written = True
+                    # Log the per-session depth toggle once. Field defaults to
+                    # False on older clients (proto3), so absence == "depth on".
+                    if getattr(msg, "depth_disabled", False):
+                        log.info("  depth_disabled=True — client is not streaming depth this session")
 
                 # --- Save raw H.265 + raw depth (always; into raw/) ---
                 t0 = time.perf_counter()

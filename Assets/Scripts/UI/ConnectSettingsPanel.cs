@@ -8,13 +8,16 @@ namespace SemanticXR.UI
 {
     /// <summary>
     /// Connect-time settings sub-panel — opened by a gear on the Connect panel.
-    /// Currently holds a single setting: the per-session far-depth cap stamped
-    /// on every upstream frame (read by the server on the first frame).
+    /// Read once at connect and stamped on every upstream frame.
     ///
-    /// Three semantic states (proto wire convention):
-    ///   • Default — value 0.0  → server uses YAML default
-    ///   • No cap  — value -1.0 → far-depth filter disabled
-    ///   • Cap     — positive cap in meters
+    /// Holds two settings:
+    ///   1. Depth streaming on/off — when off, the client sends no depth bytes
+    ///      and stamps `depth_disabled = true` on every frame. The cap row
+    ///      below dims because it's irrelevant in that case.
+    ///   2. Mapping depth cap (when depth is on). Three semantic states:
+    ///        • Default — value 0.0  → server uses YAML default
+    ///        • No cap  — value -1.0 → far-depth filter disabled
+    ///        • Cap     — positive cap in meters
     ///
     /// UI is the same drag+button slider style as SettingsPanel: drag latches
     /// on track press and uses ray-plane projection during the held phase, so
@@ -32,17 +35,21 @@ namespace SemanticXR.UI
 
         Mode _mode = Mode.Default;
         float _capValue = 4.0f;
+        bool _depthEnabled = true;
 
         GameObject _root;
+        Button _depthOnBtn, _depthOffBtn;
         Button _modeDefaultBtn, _modeNoCapBtn, _modeCapBtn;
         RectTransform _track, _thumb;
         TextMeshProUGUI _valueText;
         TextMeshProUGUI _summaryText;
+        TextMeshProUGUI _capHeaderText;
 
         bool _dragging;
 
         public Mode CurrentMode => _mode;
         public float CurrentCap => _capValue;
+        public bool DepthEnabled => _depthEnabled;
 
         // Wire value the orchestrator should send. Encodes the three modes per
         // the proto comment.
@@ -59,14 +66,25 @@ namespace SemanticXR.UI
             _root = Mk.Panel(parent, "ConnectSettings", new Color(0.07f, 0.07f, 0.11f, 0.95f));
             var r = _root.GetComponent<RectTransform>();
             // Connect panel is 650 x 420. Drop the sub-panel below the panel's
-            // bottom edge (y = -210) with a small gap. Sub-panel is 600 x 180.
-            r.anchoredPosition = new Vector2(0, -310);
-            r.sizeDelta = new Vector2(600, 180);
+            // bottom edge (y = -210) with a small gap. Sub-panel grew to 240 px
+            // tall (was 180) to fit the depth on/off row at the top, so the
+            // anchor moves to -340 (was -310) to keep the top edge in place.
+            r.anchoredPosition = new Vector2(0, -340);
+            r.sizeDelta = new Vector2(600, 240);
 
-            // Top row: header + three mode buttons.
+            // Row 0 (new): depth streaming on/off.
+            Mk.Label(_root.transform, "Depth streaming:",
+                     new Vector2(-180, 90), 14, new Color(0.85f, 0.9f, 1f),
+                     TextAlignmentOptions.MidlineLeft, 200);
+            _depthOnBtn  = Mk.Btn(_root.transform, "On",  new Vector2( 50, 90), new Vector2(80, 30),
+                                  new Color(0.3f, 0.3f, 0.4f), 14, () => SetDepthEnabled(true));
+            _depthOffBtn = Mk.Btn(_root.transform, "Off", new Vector2(150, 90), new Vector2(80, 30),
+                                  new Color(0.3f, 0.3f, 0.4f), 14, () => SetDepthEnabled(false));
+
+            // Row 1: header + three mode buttons.
             // Center at x=-130 with width 300 → rect spans [-280, +20], so the
             // text's left edge sits 20 px inside the sub-panel's left edge (-300).
-            Mk.Label(_root.transform, "Mapping depth cap (read once at connect):",
+            _capHeaderText = Mk.Label(_root.transform, "Mapping depth cap (read once at connect):",
                      new Vector2(-130, 60), 14, new Color(0.85f, 0.9f, 1f),
                      TextAlignmentOptions.MidlineLeft, 300);
 
@@ -121,7 +139,7 @@ namespace SemanticXR.UI
             if (_root == null || !_root.activeSelf) return;
             // Drag is only meaningful in Cap mode — ignore otherwise so a stray
             // press on the (visually present but inert) slider doesn't move it.
-            if (_mode != Mode.Cap) { _dragging = false; return; }
+            if (_mode != Mode.Cap || !_depthEnabled) { _dragging = false; return; }
 
             bool triggerDown = OVRInput.GetDown(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.RTouch)
                             || OVRInput.GetDown(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.LTouch);
@@ -159,13 +177,26 @@ namespace SemanticXR.UI
 
         void SetMode(Mode m)
         {
+            // Cap mode is meaningless when depth is off — ignore the click so
+            // the user doesn't accidentally end up in a state that does nothing.
+            if (!_depthEnabled) return;
             _mode = m;
             UpdateAllVisuals();
             Debug.Log($"[ConnectSettingsPanel] mode → {m}");
         }
 
+        void SetDepthEnabled(bool enabled)
+        {
+            if (_depthEnabled == enabled) return;
+            _depthEnabled = enabled;
+            if (!_depthEnabled) _dragging = false;
+            UpdateAllVisuals();
+            Debug.Log($"[ConnectSettingsPanel] depth streaming → {(enabled ? "ON" : "OFF")}");
+        }
+
         void StepCap(float delta)
         {
+            if (!_depthEnabled) return;
             // Stepping the cap also implies the user wants to BE in Cap mode —
             // promote them. Without this, ± would do nothing in Default/NoCap
             // mode and look broken.
@@ -186,31 +217,46 @@ namespace SemanticXR.UI
 
         void UpdateAllVisuals()
         {
-            // Highlight the active mode button (brighter color); de-tone others.
+            // Highlight active On/Off button.
             var active = new Color(0.55f, 0.45f, 0.15f);
             var inactive = new Color(0.3f, 0.3f, 0.4f);
-            SetButtonBg(_modeDefaultBtn, _mode == Mode.Default ? active : inactive);
-            SetButtonBg(_modeNoCapBtn,   _mode == Mode.NoCap   ? active : inactive);
-            SetButtonBg(_modeCapBtn,     _mode == Mode.Cap     ? active : inactive);
+            SetButtonBg(_depthOnBtn,  _depthEnabled  ? active : inactive);
+            SetButtonBg(_depthOffBtn, !_depthEnabled ? active : inactive);
+
+            // Highlight the active mode button (brighter color); de-tone others.
+            // When depth is off, the whole cap row dims and no mode is active.
+            SetButtonBg(_modeDefaultBtn, _depthEnabled && _mode == Mode.Default ? active : inactive);
+            SetButtonBg(_modeNoCapBtn,   _depthEnabled && _mode == Mode.NoCap   ? active : inactive);
+            SetButtonBg(_modeCapBtn,     _depthEnabled && _mode == Mode.Cap     ? active : inactive);
 
             // Slider visuals always reflect the cap value, but visually dim if
-            // mode != Cap so it's clear the value isn't what's being sent.
+            // mode != Cap (or depth is off) so it's clear the value isn't what
+            // will be sent.
             float frac = (_capValue - CapMin) / Mathf.Max(1e-6f, CapMax - CapMin);
             _thumb.anchoredPosition = new Vector2(-TrackWidthPx / 2f + frac * TrackWidthPx, 0);
             _valueText.text = $"{_capValue:F1} m";
 
-            float dim = _mode == Mode.Cap ? 1f : 0.45f;
+            float dim = (_depthEnabled && _mode == Mode.Cap) ? 1f : 0.45f;
             var thumbImg = _thumb.GetComponent<Image>();
             if (thumbImg != null) thumbImg.color = new Color(0.95f, 0.85f, 0.35f, dim);
             _valueText.color = new Color(1f, 1f, 1f, dim);
+            if (_capHeaderText != null)
+                _capHeaderText.color = new Color(0.85f, 0.9f, 1f, _depthEnabled ? 1f : 0.45f);
 
-            _summaryText.text = _mode switch
+            if (!_depthEnabled)
             {
-                Mode.Default => "Will send 0.0 — server uses YAML default.",
-                Mode.NoCap   => "Will send -1.0 — far-depth filter disabled.",
-                Mode.Cap     => $"Will send {_capValue:F1} m — cap at this distance.",
-                _            => "",
-            };
+                _summaryText.text = "Depth streaming disabled — no depth data will be sent.";
+            }
+            else
+            {
+                _summaryText.text = _mode switch
+                {
+                    Mode.Default => "Will send 0.0 — server uses YAML default.",
+                    Mode.NoCap   => "Will send -1.0 — far-depth filter disabled.",
+                    Mode.Cap     => $"Will send {_capValue:F1} m — cap at this distance.",
+                    _            => "",
+                };
+            }
         }
 
         static void SetButtonBg(Button b, Color c)
