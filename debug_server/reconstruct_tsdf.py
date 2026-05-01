@@ -21,86 +21,21 @@ import os
 # Prevent Open3D from initializing a GPU/OpenGL rendering backend on import.
 # We only use Open3D for TSDF integration and PLY I/O — visualization is done
 # in MeshLab. Without this, `import open3d` can hang indefinitely if no
-# display is available or a previous GL context wasn't cleaned up.
+# display is available or a previous GL context wasn't cleaned up. Set BEFORE
+# the lazy open3d import below so the env flag is in place when it runs.
 os.environ.setdefault("OPEN3D_CPU_RENDERING", "true")
 
 import argparse
-import re
 from pathlib import Path
 
 import numpy as np
-import open3d as o3d
-from PIL import Image
 
-
-# ---------------------------------------------------------------------------
-# Metadata parsing (shared with reconstruct.py)
-# ---------------------------------------------------------------------------
-
-def parse_metadata(meta_path):
-    """Parse a meta_XXXXXX.txt file and return a dict of values.
-
-    Recognized 4x4 matrix blocks (order doesn't matter):
-      - "depth_pose (4x4):"       -> meta["depth_pose_matrix"]
-      - "rgb_camera_pose (4x4):"  -> meta["rgb_camera_pose_matrix"]
-      - "head_pose (4x4):"        -> meta["head_pose_matrix"]
-      - "pose (4x4):"             -> meta["pose_matrix"]   (legacy, == head_pose)
-    """
-    meta = {}
-    # Accumulators for each matrix block we recognize
-    matrix_blocks = {
-        "depth_pose": [],
-        "rgb_camera_pose": [],
-        "head_pose": [],
-        "pose": [],
-    }
-    current_matrix = None
-
-    with open(meta_path, "r") as f:
-        for line in f:
-            line = line.strip()
-
-            # Detect matrix headers
-            matched_header = False
-            for name in matrix_blocks:
-                if line.startswith(f"{name} (4x4)"):
-                    current_matrix = name
-                    matched_header = True
-                    break
-            if matched_header:
-                continue
-
-            if current_matrix:
-                nums = re.findall(r"[-+]?\d*\.?\d+", line)
-                if nums and len(nums) >= 4:
-                    row = [float(x) for x in nums[:4]]
-                    matrix_blocks[current_matrix].append(row)
-                    if len(matrix_blocks[current_matrix]) == 4:
-                        current_matrix = None
-                    continue
-
-            if ": " in line:
-                key, val = line.split(": ", 1)
-                meta[key] = val
-
-    # Convert accumulated rows to numpy matrices
-    for name, rows in matrix_blocks.items():
-        if len(rows) == 4:
-            meta[f"{name}_matrix"] = np.array(rows, dtype=np.float64)
-
-    # Ensure legacy "pose_matrix" always exists (identity fallback)
-    if "pose_matrix" not in meta:
-        meta["pose_matrix"] = np.eye(4)
-
-    intr_str = meta.get("intrinsics", "")
-    for k, v in re.findall(r"(\w+)=([\d.]+)", intr_str):
-        meta[f"intr_{k}"] = float(v)
-
-    dintr_str = meta.get("depth_intrinsics", "")
-    for k, v in re.findall(r"(\w+)=([\d.]+)", dintr_str):
-        meta[f"depth_intr_{k}"] = float(v)
-
-    return meta
+# All session layout knowledge — paths, parsing, intrinsics — lives in
+# session_io. Open3D and Pillow are heavy and only needed by the TSDF
+# reconstruction below; they're imported lazily inside reconstruct_tsdf()
+# so callers that just want utilities (estimate_depth_intrinsics,
+# get_extrinsic_for_open3d) don't pay for the open3d DLL load.
+from session_io import Session
 
 
 def estimate_depth_intrinsics(depth_w, depth_h, fov_deg=90.0):
@@ -159,19 +94,14 @@ def reconstruct_tsdf(session_dir, every=1, voxel_length=0.01, sdf_trunc_factor=5
         output_file: Output path (default: session_dir/tsdf_mesh.ply)
         extract_pcd: Also extract a point cloud from the TSDF volume
     """
-    session_dir = Path(session_dir)
-    jpg_dir = session_dir / "decoded_jpg"
+    # Lazy imports for the heavy deps: see module-level comment.
+    import open3d as o3d
+    from PIL import Image
 
-    # Find complete frames
-    depth_files = sorted(session_dir.glob("depth_*.npy"))
-    frame_nums = []
-    for df in depth_files:
-        num = int(df.stem.split("_")[1])
-        rgb_path = jpg_dir / f"frame_{num:06d}.jpg"
-        meta_path = session_dir / f"meta_{num:06d}.txt"
-        if rgb_path.exists() and meta_path.exists():
-            frame_nums.append(num)
+    session = Session(session_dir)
+    session_dir = session.root  # legacy local name
 
+    frame_nums = session.complete_frames()  # RGB + depth + meta all present
     if not frame_nums:
         print("No complete frames found!")
         return None
@@ -179,8 +109,8 @@ def reconstruct_tsdf(session_dir, every=1, voxel_length=0.01, sdf_trunc_factor=5
     print(f"Found {len(frame_nums)} complete frames (RGB + depth + meta)")
 
     # Check first frame for intrinsics info
-    first_meta = parse_metadata(session_dir / f"meta_{frame_nums[0]:06d}.txt")
-    first_depth = np.load(session_dir / f"depth_{frame_nums[0]:06d}.npy")
+    first_meta = session.load_meta(frame_nums[0])
+    first_depth = np.load(session.depth_npy_path(frame_nums[0]))
     dh, dw = first_depth.shape
 
     has_depth_intr = "depth_intr_fx" in first_meta and first_meta["depth_intr_fx"] > 0
@@ -236,14 +166,11 @@ def reconstruct_tsdf(session_dir, every=1, voxel_length=0.01, sdf_trunc_factor=5
 
     skipped = 0
     for i, num in enumerate(selected):
-        rgb_path = jpg_dir / f"frame_{num:06d}.jpg"
-        depth_path = session_dir / f"depth_{num:06d}.npy"
-        meta_path = session_dir / f"meta_{num:06d}.txt"
-
-        meta = parse_metadata(meta_path)
+        rgb_path = session.jpg_path(num)
+        meta = session.load_meta(num)
 
         # Load depth (metric meters, float32)
-        depth_metric = np.load(depth_path).astype(np.float32)
+        depth_metric = np.load(session.depth_npy_path(num)).astype(np.float32)
 
         # Per-frame intrinsics if available (they can vary slightly)
         if has_depth_intr and "depth_intr_fx" in meta and meta["depth_intr_fx"] > 0:

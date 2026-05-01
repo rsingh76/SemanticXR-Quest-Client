@@ -2,29 +2,25 @@
 SemanticXR Debug gRPC Server — gRPC sibling of unity_server.py.
 
 Receives UpstreamSyncMessage_quest over gRPC (XrService.UploadSyncMessage_quest
-client-streaming RPC) from a Meta Quest 3S. All per-frame output — files
-written, meta.txt layout, decode behavior, log format — matches unity_server.py
-so decode_session.py and downstream tooling work on either transport.
+client-streaming RPC) from a Meta Quest 3S.
+
+On-disk layout, per-frame meta schema, and pose/intrinsics conventions are
+all defined in ``session_io.py`` — see that module's docstring. Both
+transports (gRPC here, TCP in unity_server.py) call the same writers from
+``session_io`` so sessions are byte-equivalent regardless of which server
+captured them.
 
 Per-frame data received (UpstreamSyncMessage_quest):
   - H.265 encoded RGB frame
   - Depth map (R16_SFloat)
-  - Head / RGB camera / depth camera poses (4x4, already LH->RH converted on client)
+  - Head / RGB camera / depth camera poses (4x4, already LH->RH converted
+    on client → right-handed, X-right Y-up Z-back, OpenGL/OpenXR)
   - Camera intrinsics
   - Meta's depth ZBufferParams
-
-Output per session — identical to unity_server.py:
-  frame_XXXXXX.h265   — Raw H.265 NAL units
-  decoded_jpg/        — Decoded RGB as JPEG (when --decode)
-  depth_XXXXXX.raw    — Raw depth bytes
-  depth_XXXXXX.npy    — Metric depth in meters (when --decode)
-  depth_png/          — 16-bit PNG depth in millimeters (when --decode)
-  meta_XXXXXX.txt     — Per-frame metadata
 """
 import argparse
 import logging
 import socket
-import struct
 import time
 from concurrent import futures
 from pathlib import Path
@@ -34,8 +30,13 @@ import grpc
 import numpy as np
 from PIL import Image
 
-import xr_service_pb2
-import xr_service_pb2_grpc
+from proto import xr_service_pb2, xr_service_pb2_grpc
+from session_io import (
+    Session,
+    ensure_session_dirs,
+    write_intrinsics_once,
+    write_meta,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("debug_grpc_server")
@@ -90,71 +91,6 @@ def decode_depth(depth_data, width, height, inv_depth_factor, depth_offset):
     return depth_metric, True
 
 
-def write_meta(session_dir: Path, msg, h265_data, depth_data, sensor_near_z,
-               inv_depth_factor, depth_offset, depth_decoded, rgb_decoded):
-    """Matches unity_server.py meta.txt layout byte-for-byte."""
-    img = msg.image
-    frame_num = img.frame_number
-    intr = msg.intrinsics
-    pose = list(msg.pose)
-    dw, dh = msg.depth_width, msg.depth_height
-
-    with open(session_dir / f"meta_{frame_num:06d}.txt", "w") as f:
-        f.write(f"frame_number: {frame_num}\n")
-        f.write(f"timestamp_us: {img.timestamp_us}\n")
-        f.write(f"timestamp_ns: {msg.timestamp_ns}\n")
-        f.write(f"image_size: {msg.image_width}x{msg.image_height}\n")
-        f.write(f"depth_size: {dw}x{dh}\n")
-        f.write(f"depth_format: R16_SFloat\n")
-        f.write(f"depth_inv_depth_factor: {inv_depth_factor:.6f}\n")
-        f.write(f"depth_offset: {depth_offset:.6f}\n")
-        f.write(f"sensor_near_z: {sensor_near_z:.6f}\n")
-        f.write(f"h265_bytes: {len(h265_data)}\n")
-        f.write(f"depth_bytes: {len(depth_data)}\n")
-        f.write(f"depth_decoded: {depth_decoded}\n")
-        f.write(f"rgb_decoded: {rgb_decoded}\n")
-        f.write(f"fps_setting: {msg.fps}\n")
-        f.write(f"intrinsics: fx={intr.fx:.4f} fy={intr.fy:.4f} cx={intr.cx:.4f} cy={intr.cy:.4f}\n")
-
-        dintr = msg.depth_intrinsics
-        if dintr and (dintr.fx > 0 or dintr.fy > 0):
-            f.write(f"depth_intrinsics: fx={dintr.fx:.4f} fy={dintr.fy:.4f} cx={dintr.cx:.4f} cy={dintr.cy:.4f}\n")
-
-        fov_tan = list(msg.depth_fov_tangents)
-        if len(fov_tan) >= 4:
-            f.write(f"depth_fov_tangents: L={fov_tan[0]:.6f} R={fov_tan[1]:.6f} T={fov_tan[2]:.6f} D={fov_tan[3]:.6f}\n")
-
-        f.write(f"rgb_timestamp_ns: {msg.rgb_timestamp_ns}\n")
-        f.write(f"depth_timestamp_ns: {msg.depth_timestamp_ns}\n")
-
-        depth_pose = list(msg.depth_pose)
-        if len(depth_pose) >= 16:
-            f.write(f"depth_pose (4x4):\n")
-            for row in range(4):
-                v = depth_pose[row * 4:(row + 1) * 4]
-                f.write(f"  [{v[0]:10.6f} {v[1]:10.6f} {v[2]:10.6f} {v[3]:10.6f}]\n")
-
-        rgb_cam_pose = list(msg.rgb_camera_pose)
-        if len(rgb_cam_pose) >= 16:
-            f.write(f"rgb_camera_pose (4x4):\n")
-            for row in range(4):
-                v = rgb_cam_pose[row * 4:(row + 1) * 4]
-                f.write(f"  [{v[0]:10.6f} {v[1]:10.6f} {v[2]:10.6f} {v[3]:10.6f}]\n")
-
-        head_pose = list(msg.head_pose)
-        if len(head_pose) < 16:
-            head_pose = pose
-        f.write(f"head_pose (4x4):\n")
-        for row in range(4):
-            v = head_pose[row * 4:(row + 1) * 4] if len(head_pose) >= 16 else [0] * 4
-            f.write(f"  [{v[0]:10.6f} {v[1]:10.6f} {v[2]:10.6f} {v[3]:10.6f}]\n")
-
-        f.write(f"pose (4x4):\n")
-        for row in range(4):
-            v = pose[row * 4:(row + 1) * 4] if len(pose) >= 16 else [0] * 4
-            f.write(f"  [{v[0]:10.6f} {v[1]:10.6f} {v[2]:10.6f} {v[3]:10.6f}]\n")
-
-
 class FramesServicer(xr_service_pb2_grpc.XrServiceServicer):
     """Mirrors unity_server.handle_client. raw_only controlled at construction."""
 
@@ -175,11 +111,14 @@ class FramesServicer(xr_service_pb2_grpc.XrServiceServicer):
         log.info(f"New session: {session_dir}")
 
         decoder = None if self._raw_only else H265Decoder()
-        jpg_dir = session_dir / "decoded_jpg"
-        depth_dir = session_dir / "depth_png"
-        if not self._raw_only:
-            jpg_dir.mkdir(exist_ok=True)
-            depth_dir.mkdir(exist_ok=True)
+        # All path/subdir knowledge lives in session_io. ensure_session_dirs
+        # creates meta/ + raw/ unconditionally; decoded_jpg/, depth/,
+        # depth_png/ only when --decode is on (raw-only mode skips inline
+        # decoding to keep the server network-limited and lets
+        # decode_session.py fill those subdirs in later).
+        ensure_session_dirs(session_dir, decoded=not self._raw_only)
+        session = Session(session_dir)
+        intrinsics_written = False
 
         frame_count = 0
         start = time.time()
@@ -208,12 +147,20 @@ class FramesServicer(xr_service_pb2_grpc.XrServiceServicer):
                 depth_offset = msg.depth_far_z
                 sensor_near_z = -inv_depth_factor / 2.0 if inv_depth_factor != 0 else 0
 
-                # --- Save raw H.265 + raw depth ---
+                # Scene-level intrinsics.json: write once, on first frame, so
+                # downstream code (this server's reconstruction scripts AND
+                # semantic-slam-server's QuestDataset) can read intrinsics
+                # without parsing any frame meta.
+                if not intrinsics_written:
+                    write_intrinsics_once(session_dir, msg)
+                    intrinsics_written = True
+
+                # --- Save raw H.265 + raw depth (always; into raw/) ---
                 t0 = time.perf_counter()
                 if h265_data:
-                    (session_dir / f"frame_{frame_num:06d}.h265").write_bytes(h265_data)
+                    session.raw_h265_path(frame_num).write_bytes(h265_data)
                 if depth_data:
-                    (session_dir / f"depth_{frame_num:06d}.raw").write_bytes(depth_data)
+                    session.raw_depth_path(frame_num).write_bytes(depth_data)
                 t_rawio_ms = (time.perf_counter() - t0) * 1000.0
 
                 # --- Decode RGB (skipped in raw-only mode) ---
@@ -222,7 +169,7 @@ class FramesServicer(xr_service_pb2_grpc.XrServiceServicer):
                 if not self._raw_only:
                     decoded_img = decoder.decode_frame(h265_data)
                     if decoded_img:
-                        decoded_img.save(str(jpg_dir / f"frame_{frame_num:06d}.jpg"), quality=90)
+                        decoded_img.save(str(session.jpg_path(frame_num)), quality=90)
                 t_rgb_ms = (time.perf_counter() - t0) * 1000.0
 
                 # --- Decode depth (skipped in raw-only mode) ---
@@ -241,10 +188,10 @@ class FramesServicer(xr_service_pb2_grpc.XrServiceServicer):
                                     f"median={np.median(valid):.2f}m "
                                     f"sensor_near={sensor_near_z:.3f}m"
                                 )
-                        np.save(str(session_dir / f"depth_{frame_num:06d}.npy"), depth_metric)
+                        np.save(str(session.depth_npy_path(frame_num)), depth_metric)
                         depth_mm = (depth_metric * 1000.0).clip(0, 65535).astype(np.uint16)
                         Image.fromarray(depth_mm, mode='I;16').save(
-                            str(depth_dir / f"depth_{frame_num:06d}.png")
+                            str(session.depth_png_path(frame_num))
                         )
                     elif frame_count <= 3:
                         log.warning(
@@ -306,6 +253,13 @@ class FramesServicer(xr_service_pb2_grpc.XrServiceServicer):
 
                 t_prev = time.perf_counter()
 
+        except grpc.RpcError as ex:
+            # gRPC raises this from the request iterator when the client
+            # closes the stream — that's the *normal* end-of-session signal,
+            # not an error. Log at INFO with the status code (CANCELLED on a
+            # clean client disconnect) and let the finally block run.
+            code = ex.code() if hasattr(ex, "code") else "unknown"
+            log.info(f"Client closed stream ({code})")
         except Exception as ex:
             log.error(f"Error: {ex}", exc_info=True)
         finally:

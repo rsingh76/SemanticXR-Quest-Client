@@ -26,8 +26,7 @@ from pathlib import Path
 
 import grpc
 
-import vis_pb2
-import vis_pb2_grpc
+from proto import vis_pb2, vis_pb2_grpc
 
 # Matches slam/services/visualization_service.py::WriteWavHeader defaults.
 SAMPLE_RATE    = 12000

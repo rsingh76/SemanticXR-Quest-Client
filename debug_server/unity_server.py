@@ -7,17 +7,16 @@ Protocol: "QUEST_STREAM\n" header, then repeated [4-byte big-endian length][prot
 Per-frame data received (UpstreamSyncMessage_quest):
   - H.265 encoded RGB frame (1280x960, left camera)
   - Depth map (320x320, R16_SFloat, left eye — R channel stripped on client)
-  - Head pose (4x4 matrix, OpenXR right-handed convention)
+  - Head / RGB camera / depth camera poses (4x4, RH after client-side LH->RH;
+    X-right Y-up Z-back, OpenGL/OpenXR convention)
   - Camera intrinsics (fx, fy, cx, cy)
   - Meta's depth ZBufferParams (invDepthFactor, depthOffset) for metric conversion
 
-Output per session:
-  frame_XXXXXX.h265   — Raw H.265 NAL units
-  decoded_jpg/        — Decoded RGB as JPEG
-  depth_XXXXXX.raw    — Raw depth bytes (R16G16B16A16_SFloat)
-  depth_XXXXXX.npy    — Metric depth in meters (float32)
-  depth_png/          — 16-bit PNG depth in millimeters
-  meta_XXXXXX.txt     — Per-frame metadata (pose, intrinsics, depth params)
+On-disk layout — IDENTICAL to unity_grpc_server.py; see that module's docstring
+for the full tree and pose/intrinsics conventions. The meta-JSON and
+intrinsics-JSON writers are shared with the gRPC server (write_meta /
+write_intrinsics_once) so the two transports produce byte-for-byte equivalent
+sessions.
 
 Depth conversion (see DEPTH_CONVERSION.md for full derivation):
   The preprocessed depth texture R channel stores an inverted NDC value.
@@ -36,7 +35,13 @@ import av
 import numpy as np
 from PIL import Image
 
-import xr_service_pb2
+from proto import xr_service_pb2
+from session_io import (
+    Session,
+    ensure_session_dirs,
+    write_intrinsics_once,
+    write_meta,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("debug_server")
@@ -169,11 +174,12 @@ def handle_client(conn, addr, session_dir, raw_only=True):
     frame_count = 0
     start = time.time()
     decoder = None if raw_only else H265Decoder()
-    jpg_dir = session_dir / "decoded_jpg"
-    depth_dir = session_dir / "depth_png"
-    if not raw_only:
-        jpg_dir.mkdir(exist_ok=True)
-        depth_dir.mkdir(exist_ok=True)
+    # All path/subdir knowledge lives in session_io. Identical setup to the
+    # gRPC server (unity_grpc_server.py) — sessions captured via either
+    # transport are byte-equivalent.
+    ensure_session_dirs(session_dir, decoded=not raw_only)
+    session = Session(session_dir)
+    intrinsics_written = False
 
     # Per-stage timing accumulators. Averaged and logged every STATS_WINDOW frames
     # so the impact on the hot path is a few float adds per stage.
@@ -222,12 +228,20 @@ def handle_client(conn, addr, session_dir, raw_only=True):
             # Derive the actual sensor near plane for logging
             sensor_near_z = -inv_depth_factor / 2.0 if inv_depth_factor != 0 else 0
 
-            # --- Save raw H.265 + raw depth ---
+            # Scene-level intrinsics.json: write once on the first frame so
+            # downstream tools (this server's reconstruction scripts AND
+            # semantic-slam-server's QuestDataset) can read intrinsics
+            # without parsing per-frame meta.
+            if not intrinsics_written:
+                write_intrinsics_once(session_dir, msg)
+                intrinsics_written = True
+
+            # --- Save raw H.265 + raw depth (always; into raw/) ---
             t0 = time.perf_counter()
             if h265_data:
-                (session_dir / f"frame_{frame_num:06d}.h265").write_bytes(h265_data)
+                session.raw_h265_path(frame_num).write_bytes(h265_data)
             if depth_data:
-                (session_dir / f"depth_{frame_num:06d}.raw").write_bytes(depth_data)
+                session.raw_depth_path(frame_num).write_bytes(depth_data)
             t_rawio_ms = (time.perf_counter() - t0) * 1000.0
 
             # --- Decode RGB (skipped in raw-only mode) ---
@@ -236,7 +250,7 @@ def handle_client(conn, addr, session_dir, raw_only=True):
             if not raw_only:
                 decoded_img = decoder.decode_frame(h265_data)
                 if decoded_img:
-                    decoded_img.save(str(jpg_dir / f"frame_{frame_num:06d}.jpg"), quality=90)
+                    decoded_img.save(str(session.jpg_path(frame_num)), quality=90)
             t_rgb_ms = (time.perf_counter() - t0) * 1000.0
 
             # --- Decode depth to metric meters (skipped in raw-only mode) ---
@@ -259,12 +273,12 @@ def handle_client(conn, addr, session_dir, raw_only=True):
                             )
 
                     # Save metric depth as float32 .npy (exact values)
-                    np.save(str(session_dir / f"depth_{frame_num:06d}.npy"), depth_metric)
+                    np.save(str(session.depth_npy_path(frame_num)), depth_metric)
 
                     # Save as 16-bit PNG in millimeters (max representable: 65.535m)
                     depth_mm = (depth_metric * 1000.0).clip(0, 65535).astype(np.uint16)
                     Image.fromarray(depth_mm, mode='I;16').save(
-                        str(depth_dir / f"depth_{frame_num:06d}.png")
+                        str(session.depth_png_path(frame_num))
                     )
                 elif frame_count <= 3:
                     log.warning(
@@ -274,72 +288,16 @@ def handle_client(conn, addr, session_dir, raw_only=True):
             t_depth_ms = (time.perf_counter() - t0) * 1000.0
 
             # --- Save metadata ---
+            # Per-frame meta as JSON in meta/ — see write_meta in unity_grpc_server.py
+            # for the format. Shared with the gRPC server so both transports
+            # produce byte-equivalent sessions.
             t0 = time.perf_counter()
-            pose = list(msg.pose)
-            with open(session_dir / f"meta_{frame_num:06d}.txt", "w") as f:
-                f.write(f"frame_number: {frame_num}\n")
-                f.write(f"timestamp_us: {img_msg.timestamp_us}\n")
-                f.write(f"timestamp_ns: {msg.timestamp_ns}\n")
-                f.write(f"image_size: {msg.image_width}x{msg.image_height}\n")
-                f.write(f"depth_size: {dw}x{dh}\n")
-                f.write(f"depth_format: R16_SFloat\n")
-                f.write(f"depth_inv_depth_factor: {inv_depth_factor:.6f}\n")
-                f.write(f"depth_offset: {depth_offset:.6f}\n")
-                f.write(f"sensor_near_z: {sensor_near_z:.6f}\n")
-                f.write(f"h265_bytes: {len(h265_data)}\n")
-                f.write(f"depth_bytes: {len(depth_data)}\n")
-                f.write(f"depth_decoded: {depth_decoded}\n")
-                f.write(f"rgb_decoded: {decoded_img is not None}\n")
-                f.write(f"fps_setting: {msg.fps}\n")
-                f.write(f"intrinsics: fx={intr.fx:.4f} fy={intr.fy:.4f} cx={intr.cx:.4f} cy={intr.cy:.4f}\n")
-
-                # Depth camera intrinsics (derived from FOV tangents, if available)
-                dintr = msg.depth_intrinsics
-                if dintr and (dintr.fx > 0 or dintr.fy > 0):
-                    f.write(f"depth_intrinsics: fx={dintr.fx:.4f} fy={dintr.fy:.4f} cx={dintr.cx:.4f} cy={dintr.cy:.4f}\n")
-
-                # Depth FOV tangents (source of truth from Meta SDK)
-                fov_tan = list(msg.depth_fov_tangents)
-                if len(fov_tan) >= 4:
-                    f.write(f"depth_fov_tangents: L={fov_tan[0]:.6f} R={fov_tan[1]:.6f} T={fov_tan[2]:.6f} D={fov_tan[3]:.6f}\n")
-
-                # Sensor timestamps (different clock domains!)
-                f.write(f"rgb_timestamp_ns: {msg.rgb_timestamp_ns}\n")
-                f.write(f"depth_timestamp_ns: {msg.depth_timestamp_ns}\n")
-
-                # --- Poses (all RH after LH->RH conversion in TcpProtoClient) ---
-
-                # Depth camera pose (from EnvironmentDepthFrameDesc, OpenXR tracking space)
-                depth_pose = list(msg.depth_pose)
-                if len(depth_pose) >= 16:
-                    f.write(f"depth_pose (4x4):\n")
-                    for row in range(4):
-                        vals = depth_pose[row * 4:(row + 1) * 4]
-                        f.write(f"  [{vals[0]:10.6f} {vals[1]:10.6f} {vals[2]:10.6f} {vals[3]:10.6f}]\n")
-
-                # RGB camera pose (from PassthroughCameraAccess.GetCameraPose(), Unity world)
-                rgb_cam_pose = list(msg.rgb_camera_pose)
-                if len(rgb_cam_pose) >= 16:
-                    f.write(f"rgb_camera_pose (4x4):\n")
-                    for row in range(4):
-                        vals = rgb_cam_pose[row * 4:(row + 1) * 4]
-                        f.write(f"  [{vals[0]:10.6f} {vals[1]:10.6f} {vals[2]:10.6f} {vals[3]:10.6f}]\n")
-
-                # Head pose (Camera.main eye center, Unity world) — also written as legacy 'pose'
-                head_pose = list(msg.head_pose)
-                if len(head_pose) < 16:
-                    head_pose = pose  # fall back to legacy 'pose' field
-                f.write(f"head_pose (4x4):\n")
-                for row in range(4):
-                    vals = head_pose[row * 4:(row + 1) * 4] if len(head_pose) >= 16 else [0] * 4
-                    f.write(f"  [{vals[0]:10.6f} {vals[1]:10.6f} {vals[2]:10.6f} {vals[3]:10.6f}]\n")
-
-                # Legacy 'pose' field (== head_pose, kept for backward compat)
-                f.write(f"pose (4x4):\n")
-                for row in range(4):
-                    vals = pose[row * 4:(row + 1) * 4] if len(pose) >= 16 else [0] * 4
-                    f.write(f"  [{vals[0]:10.6f} {vals[1]:10.6f} {vals[2]:10.6f} {vals[3]:10.6f}]\n")
-
+            write_meta(
+                session_dir, msg, h265_data, depth_data, sensor_near_z,
+                inv_depth_factor, depth_offset,
+                depth_decoded=depth_decoded,
+                rgb_decoded=(decoded_img is not None),
+            )
             t_meta_ms = (time.perf_counter() - t0) * 1000.0
 
             # Work done after recv finished (i.e. how long the server blocks TCP

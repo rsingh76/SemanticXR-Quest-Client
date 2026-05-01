@@ -33,7 +33,7 @@ import numpy as np
 import open3d as o3d
 from PIL import Image
 
-from reconstruct_tsdf import parse_metadata
+from session_io import Session
 
 
 def build_rays_for_frame(rgb_pose, fx, fy, cx, cy, img_w, img_h, stride=1):
@@ -122,7 +122,8 @@ def main():
         if not sessions:
             print("No sessions"); return
         args.session_dir = str(sessions[-1])
-    sd = Path(args.session_dir)
+    session = Session(args.session_dir)
+    sd = session.root
     mesh_path = Path(args.mesh) if args.mesh else sd / "unity_mesh.ply"
     if not mesh_path.exists():
         print(f"Mesh not found: {mesh_path} — run unity_reconstruct.py first")
@@ -140,14 +141,7 @@ def main():
           f"{len(mesh.triangles)} tris")
 
     # Find frames
-    jpg_dir = sd / "decoded_jpg"
-    depth_files = sorted(sd.glob("depth_*.npy"))  # use for frame-num enumeration
-    frames = []
-    for df in depth_files:
-        num = int(df.stem.split("_")[1])
-        if (jpg_dir / f"frame_{num:06d}.jpg").exists() and \
-           (sd / f"meta_{num:06d}.txt").exists():
-            frames.append(num)
+    frames = session.complete_frames()
     if args.frames_range:
         lo, hi = (int(x) for x in args.frames_range.split(":"))
         frames = [n for n in frames if lo <= n <= hi]
@@ -166,12 +160,12 @@ def main():
     all_pts, all_cols = [], []
     skipped = 0
     for i, num in enumerate(frames):
-        meta = parse_metadata(sd / f"meta_{num:06d}.txt")
+        meta = session.load_meta(num)
         rgb_pose = meta.get("rgb_camera_pose_matrix")
         if rgb_pose is None or abs(np.linalg.det(rgb_pose[:3, :3])) < 0.5:
             skipped += 1
             continue
-        rgb = np.array(Image.open(jpg_dir / f"frame_{num:06d}.jpg").convert("RGB"))
+        rgb = np.array(Image.open(session.jpg_path(num)).convert("RGB"))
         img_h, img_w = rgb.shape[:2]
         rgb_intr = (meta["intr_fx"], meta["intr_fy"],
                     meta["intr_cx"], meta["intr_cy"])

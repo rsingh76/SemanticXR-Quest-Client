@@ -11,7 +11,7 @@ import numpy as np
 from scipy.optimize import least_squares
 from scipy.spatial.transform import Rotation as Rscipy
 
-from reconstruct_tsdf import parse_metadata
+from session_io import Session
 
 
 SESSION = Path("debug_output/session_1776547868")
@@ -46,7 +46,7 @@ def residuals(params, worlds, targets, fx, fy, cx, cy, img_h):
 
 
 def main():
-    meta = parse_metadata(SESSION / f"meta_{FRAME:06d}.txt")
+    meta = Session(SESSION).load_meta(FRAME)
     rgb_pose = meta["rgb_camera_pose_matrix"]
     fx = meta["intr_fx"]; fy = meta["intr_fy"]
     cx = meta["intr_cx"]; cy = meta["intr_cy"]

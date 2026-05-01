@@ -22,7 +22,7 @@ os.environ.setdefault("OPEN3D_CPU_RENDERING", "true")
 import numpy as np
 import open3d as o3d
 
-from reconstruct_tsdf import parse_metadata
+from session_io import Session
 from unity_reconstruct import build_tsdf
 
 
@@ -87,12 +87,12 @@ def trajectory_polyline(points: np.ndarray, color: np.ndarray) -> o3d.geometry.L
 
 def collect_poses(session_dir: Path):
     """Return (frame_nums, depth_poses [Nx4x4], rgb_poses [Nx4x4]).
-    A missing pose for a given camera becomes None at that index."""
-    meta_files = sorted(session_dir.glob("meta_*.txt"))
+    A missing pose for a given camera becomes None at that index.
+    """
+    session = Session(session_dir)
     frame_nums, depth_poses, rgb_poses = [], [], []
-    for mf in meta_files:
-        meta = parse_metadata(mf)
-        num = int(mf.stem.split("_")[1])
+    for num in session.frames_with_meta():
+        meta = session.load_meta(num)
         frame_nums.append(num)
         depth_poses.append(meta.get("depth_pose_matrix"))
         rgb_poses.append(meta.get("rgb_camera_pose_matrix"))
