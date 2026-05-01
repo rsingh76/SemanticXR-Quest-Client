@@ -25,7 +25,7 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw
-from reconstruct_tsdf import parse_metadata
+from session_io import Session
 
 
 def project(world_pts, pose, fx, fy, cx, cy, img_w, img_h):
@@ -108,7 +108,7 @@ def main():
     print(f"  rotation delta   : {delta_deg:.2f} deg")
 
     # Load frame data
-    meta = parse_metadata(sd / f"meta_{frame:06d}.txt")
+    meta = Session(sd).load_meta(frame)
     rgb = Image.open(sd / f"decoded_jpg/frame_{frame:06d}.jpg").convert("RGB")
     img_w, img_h = rgb.size
     fx = meta["intr_fx"]; fy = meta["intr_fy"]

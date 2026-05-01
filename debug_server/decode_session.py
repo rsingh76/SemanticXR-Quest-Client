@@ -1,12 +1,16 @@
-"""Decode raw .h265 and .raw files in a raw-only session into .jpg and .npy.
+"""Decode raw HEVC + R16_SFloat depth bytes captured by the debug servers.
 
-Use this after capturing with unity_server.py (which defaults to raw-only mode).
-Produces the same decoded_jpg/ and depth_{XXX}.npy files the legacy --decode
-server mode would have produced, but offline so the capture stays fast.
+Use this after capturing with unity_grpc_server.py / unity_server.py in their
+default raw-only mode. Produces ``decoded_jpg/*.jpg`` and ``depth/*.npy`` +
+``depth_png/*.png`` from the ``raw/`` subdir, so the capture path stays
+network-limited and decode happens offline.
 
 Auto-detects depth format from file size:
-  - 2 bytes/pixel = R16_SFloat       (post-R-only-strip client)
-  - 8 bytes/pixel = R16G16B16A16_SFloat (legacy client)
+  - 2 bytes/pixel = R16_SFloat       (post-R-only-strip client; current)
+  - 8 bytes/pixel = R16G16B16A16_SFloat (legacy 4-channel client)
+
+All session-layout knowledge lives in ``session_io.Session`` — paths,
+subdir names, meta JSON shape. See that module for the full layout.
 
 Usage:
     python decode_session.py [session_dir]           # one session
@@ -20,15 +24,7 @@ import av
 import numpy as np
 from PIL import Image
 
-
-def parse_meta(path):
-    d = {}
-    for line in path.read_text().splitlines():
-        if ":" not in line:
-            continue
-        k, _, v = line.partition(":")
-        d[k.strip()] = v.strip()
-    return d
+from session_io import Session, ensure_session_dirs
 
 
 def decode_depth_raw(raw_bytes, w, h):
@@ -52,24 +48,24 @@ def metric_depth(r_channel, sensor_near_z):
     return np.clip(d, 0, 100.0)
 
 
-def decode_one_session(session: Path, verbose=True):
-    if not session.is_dir():
-        print(f"  skip (not a dir): {session}")
+def decode_one_session(session_dir: Path, verbose=True):
+    if not session_dir.is_dir():
+        print(f"  skip (not a dir): {session_dir}")
         return
 
-    h265_files = sorted(session.glob("frame_*.h265"))
-    raw_files = sorted(session.glob("depth_*.raw"))
+    session = Session(session_dir)
+    h265_files = session.list_raw_h265()
+    raw_files = session.list_raw_depth()
     if not h265_files and not raw_files:
-        print(f"  skip (no raw files): {session.name}")
+        print(f"  skip (no raw files): {session_dir.name}")
         return
 
-    print(f"Decoding {session.name}: {len(h265_files)} h265, {len(raw_files)} depth")
-    jpg_dir = session / "decoded_jpg"
-    png_dir = session / "depth_png"
-    jpg_dir.mkdir(exist_ok=True)
-    png_dir.mkdir(exist_ok=True)
+    print(f"Decoding {session_dir.name}: {len(h265_files)} h265, {len(raw_files)} depth")
+    # decoded_jpg/, depth/, depth_png/ may not exist yet if the server ran in
+    # raw-only mode — let session_io create them. meta/ and raw/ already exist.
+    ensure_session_dirs(session_dir, decoded=True)
 
-    # --- H.265 -> JPG ---
+    # --- H.265 -> decoded_jpg/*.jpg ---------------------------------------
     #
     # H.265 decoders are stateful. Every packet must be fed to the decoder
     # IN ORDER — skipping a packet (even one whose JPG already exists) breaks
@@ -89,7 +85,7 @@ def decode_one_session(session: Path, verbose=True):
         m = re.search(r"frame_(\d+)\.h265", h.name)
         if not m:
             continue
-        num = m.group(1)
+        num = int(m.group(1))
         packet_order.append(num)
         data = h.read_bytes()
         if not data.startswith(b"\x00\x00\x00\x01") and not data.startswith(b"\x00\x00\x01"):
@@ -99,7 +95,7 @@ def decode_one_session(session: Path, verbose=True):
                 if not packet_order:
                     break
                 label = packet_order.pop(0)
-                out = jpg_dir / f"frame_{label}.jpg"
+                out = session.jpg_path(label)
                 if not out.exists():
                     Image.fromarray(frame.to_ndarray(format="rgb24")).save(str(out), quality=90)
                 rgb_done += 1
@@ -111,7 +107,7 @@ def decode_one_session(session: Path, verbose=True):
             if not packet_order:
                 break
             label = packet_order.pop(0)
-            out = jpg_dir / f"frame_{label}.jpg"
+            out = session.jpg_path(label)
             if not out.exists():
                 Image.fromarray(frame.to_ndarray(format="rgb24")).save(str(out), quality=90)
             rgb_done += 1
@@ -119,22 +115,22 @@ def decode_one_session(session: Path, verbose=True):
         pass
     rgb_pending = len(packet_order)   # packets that never emerged (true failures)
 
-    # --- depth .raw -> .npy + .png ---
+    # --- depth .raw -> depth/*.npy + depth_png/*.png ----------------------
     depth_done = depth_skip = depth_fail = 0
     for r in raw_files:
         m = re.search(r"depth_(\d+)\.raw", r.name)
         if not m:
             continue
-        num = m.group(1)
-        out_npy = session / f"depth_{num}.npy"
+        num = int(m.group(1))
+        out_npy = session.depth_npy_path(num)
         if out_npy.exists():
             depth_skip += 1
             continue
-        meta_path = session / f"meta_{num}.txt"
+        meta_path = session.meta_path(num)
         if not meta_path.exists():
             depth_fail += 1
             continue
-        meta = parse_meta(meta_path)
+        meta = session.load_meta(num)
         try:
             dw, dh = [int(x) for x in meta["depth_size"].split("x")]
         except Exception:
@@ -142,7 +138,7 @@ def decode_one_session(session: Path, verbose=True):
             continue
         try:
             sensor_near = float(meta.get("sensor_near_z", 0))
-        except ValueError:
+        except (TypeError, ValueError):
             sensor_near = 0.0
         try:
             r_channel = decode_depth_raw(r.read_bytes(), dw, dh)
@@ -155,7 +151,7 @@ def decode_one_session(session: Path, verbose=True):
         np.save(str(out_npy), depth)
         if sensor_near > 0:
             mm = (depth * 1000.0).clip(0, 65535).astype(np.uint16)
-            Image.fromarray(mm, mode="I;16").save(str(png_dir / f"depth_{num}.png"))
+            Image.fromarray(mm, mode="I;16").save(str(session.depth_png_path(num)))
         depth_done += 1
 
     print(f"  RGB: {rgb_done} decoded, {rgb_pending} buffered (never emerged), {rgb_fail} packet errors")
@@ -184,16 +180,16 @@ def main():
         return
 
     if args.session_dir:
-        session = Path(args.session_dir)
+        session_dir = Path(args.session_dir)
     else:
         sessions = sorted(base.glob("session_*"), key=lambda p: p.stat().st_mtime)
         if not sessions:
             print("No sessions in", base)
             return
-        session = sessions[-1]
-        print(f"Auto-selected: {session}")
+        session_dir = sessions[-1]
+        print(f"Auto-selected: {session_dir}")
 
-    decode_one_session(session)
+    decode_one_session(session_dir)
 
 
 if __name__ == "__main__":

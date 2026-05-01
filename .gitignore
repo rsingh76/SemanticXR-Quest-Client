@@ -27,6 +27,7 @@ Assets/_Recovery.meta
 
 # Debug server (Python)
 debug_server/_*.py
+debug_server/_scratchpad/
 debug_server/debug_output/
 debug_server/backup_dir/
 debug_server/**/__pycache__/

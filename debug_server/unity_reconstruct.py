@@ -21,25 +21,20 @@ from pathlib import Path
 import numpy as np
 import open3d as o3d
 
-from reconstruct_tsdf import parse_metadata
+from session_io import Session
 
 
 def build_tsdf(session_dir, voxel=0.01, max_depth=5.0):
-    session_dir = Path(session_dir)
+    session = Session(session_dir)
 
-    depth_files = sorted(session_dir.glob("depth_*.npy"))
-    frame_nums = []
-    for df in depth_files:
-        num = int(df.stem.split("_")[1])
-        if (session_dir / f"meta_{num:06d}.txt").exists():
-            frame_nums.append(num)
-
+    frame_nums = [n for n in session.frames_with_depth()
+                  if session.meta_path(n).exists()]
     if not frame_nums:
         print("No frames found")
         return None
 
-    first_meta = parse_metadata(session_dir / f"meta_{frame_nums[0]:06d}.txt")
-    first_depth = np.load(session_dir / f"depth_{frame_nums[0]:06d}.npy")
+    first_meta = session.load_meta(frame_nums[0])
+    first_depth = np.load(session.depth_npy_path(frame_nums[0]))
     dh, dw = first_depth.shape
 
     # Depth intrinsics from meta (computed from FOV tangents on client)
@@ -67,8 +62,8 @@ def build_tsdf(session_dir, voxel=0.01, max_depth=5.0):
 
     skipped = 0
     for i, num in enumerate(frame_nums):
-        meta = parse_metadata(session_dir / f"meta_{num:06d}.txt")
-        depth_metric = np.load(session_dir / f"depth_{num:06d}.npy").astype(np.float32)
+        meta = session.load_meta(num)
+        depth_metric = np.load(session.depth_npy_path(num)).astype(np.float32)
 
         if "depth_pose_matrix" in meta:
             pose_c2w = meta["depth_pose_matrix"]
@@ -112,7 +107,7 @@ def build_tsdf(session_dir, voxel=0.01, max_depth=5.0):
         mesh.remove_triangles_by_mask(~keep)
         mesh.remove_unreferenced_vertices()
 
-    out = session_dir / "unity_mesh.ply"
+    out = session.root / "unity_mesh.ply"
     o3d.io.write_triangle_mesh(str(out), mesh)
     print(f"\n{len(mesh.vertices)} verts -> {out}")
     return out

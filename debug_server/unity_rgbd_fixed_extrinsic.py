@@ -32,7 +32,7 @@ import numpy as np
 import open3d as o3d
 from PIL import Image
 
-from reconstruct_tsdf import parse_metadata
+from session_io import Session
 
 
 def _quat_from_matrix(R):
@@ -98,11 +98,11 @@ def robust_mean_transform(transforms):
     return T
 
 
-def compute_fixed_extrinsic(session_dir, frames):
+def compute_fixed_extrinsic(session: Session, frames):
     """Estimate a single depth->rgb local-frame transform across the session."""
     transforms = []
     for num in frames:
-        m = parse_metadata(session_dir / f"meta_{num:06d}.txt")
+        m = session.load_meta(num)
         dp = m.get("depth_pose_matrix")
         rp = m.get("rgb_camera_pose_matrix")
         if dp is None or rp is None:
@@ -164,23 +164,17 @@ def main():
         if not sessions:
             print("No sessions"); return
         args.session_dir = str(sessions[-1])
-    sd = Path(args.session_dir)
-    jpg_dir = sd / "decoded_jpg"
+    session = Session(args.session_dir)
+    sd = session.root
 
-    depth_files = sorted(sd.glob("depth_*.npy"))
-    frames = []
-    for df in depth_files:
-        num = int(df.stem.split("_")[1])
-        if (jpg_dir / f"frame_{num:06d}.jpg").exists() and \
-           (sd / f"meta_{num:06d}.txt").exists():
-            frames.append(num)
+    frames = session.complete_frames()
     if args.frames_range:
         lo, hi = (int(x) for x in args.frames_range.split(":"))
         frames = [n for n in frames if lo <= n <= hi]
     print(f"Session: {sd.name}  frames: {len(frames)}")
 
     # Estimate fixed extrinsic
-    T_rgb_from_depth, n_used = compute_fixed_extrinsic(sd, frames)
+    T_rgb_from_depth, n_used = compute_fixed_extrinsic(session, frames)
     print(f"Fixed T_rgb<-depth from {n_used} frames:")
     print(f"  translation (m): {T_rgb_from_depth[:3, 3]}")
     print(f"  rotation (upper 3x3):")
@@ -200,14 +194,14 @@ def main():
     all_pts, all_cols = [], []
     skipped = 0
     for i, num in enumerate(frames):
-        meta = parse_metadata(sd / f"meta_{num:06d}.txt")
+        meta = session.load_meta(num)
         d_pose = meta.get("depth_pose_matrix")
         if d_pose is None or abs(np.linalg.det(d_pose[:3, :3])) < 0.5:
             skipped += 1
             continue
 
-        depth = np.load(sd / f"depth_{num:06d}.npy").astype(np.float32)
-        rgb = np.array(Image.open(jpg_dir / f"frame_{num:06d}.jpg").convert("RGB"))
+        depth = np.load(session.depth_npy_path(num)).astype(np.float32)
+        rgb = np.array(Image.open(session.jpg_path(num)).convert("RGB"))
         img_h, img_w = rgb.shape[:2]
 
         d_fx = meta["depth_intr_fx"]; d_fy = meta["depth_intr_fy"]

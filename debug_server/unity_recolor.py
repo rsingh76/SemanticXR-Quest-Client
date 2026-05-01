@@ -33,7 +33,7 @@ import numpy as np
 from PIL import Image
 import open3d as o3d
 
-from reconstruct_tsdf import parse_metadata
+from session_io import Session
 
 
 def project_vertices(verts, pose_c2w_rh, fx, fy, cx, cy, img_h):
@@ -54,7 +54,7 @@ def project_vertices(verts, pose_c2w_rh, fx, fy, cx, cy, img_h):
 
 
 def recolor(session_dir, mesh_path, frame_num=None, multi=False, occlude_tol=0.03):
-    session_dir = Path(session_dir)
+    session = Session(session_dir)
     mesh = o3d.io.read_triangle_mesh(str(mesh_path))
     mesh.compute_vertex_normals()
     verts = np.asarray(mesh.vertices)
@@ -65,15 +65,7 @@ def recolor(session_dir, mesh_path, frame_num=None, multi=False, occlude_tol=0.0
     if multi:
         print(f"Per-frame depth-image occlusion enabled; tolerance = {occlude_tol} m")
 
-    jpg_dir = session_dir / "decoded_jpg"
-    depth_files = sorted(session_dir.glob("depth_*.npy"))
-    frame_nums = []
-    for df in depth_files:
-        num = int(df.stem.split("_")[1])
-        if (jpg_dir / f"frame_{num:06d}.jpg").exists() and \
-           (session_dir / f"meta_{num:06d}.txt").exists():
-            frame_nums.append(num)
-
+    frame_nums = session.complete_frames()
     if frame_num is not None:
         frame_nums = [frame_num]
     print(f"Using {len(frame_nums)} frames")
@@ -82,14 +74,14 @@ def recolor(session_dir, mesh_path, frame_num=None, multi=False, occlude_tol=0.0
     weight_sum = np.zeros(n, dtype=np.float64)
 
     for i, num in enumerate(frame_nums):
-        meta = parse_metadata(session_dir / f"meta_{num:06d}.txt")
+        meta = session.load_meta(num)
         pose = meta.get("rgb_camera_pose_matrix",
                         meta.get("head_pose_matrix", meta["pose_matrix"]))
         det = np.linalg.det(pose[:3, :3])
         if abs(det) < 0.5 or abs(det) > 2.0:
             continue
 
-        rgb = np.array(Image.open(jpg_dir / f"frame_{num:06d}.jpg").convert("RGB"))
+        rgb = np.array(Image.open(session.jpg_path(num)).convert("RGB"))
         img_h, img_w = rgb.shape[:2]
         fx = meta.get("intr_fx", 859.2)
         fy = meta.get("intr_fy", 859.2)
@@ -132,7 +124,7 @@ def recolor(session_dir, mesh_path, frame_num=None, multi=False, occlude_tol=0.0
             d_cy = meta.get("depth_intr_cy")
 
             if d_fx and d_fx > 0:
-                depth_img = np.load(session_dir / f"depth_{num:06d}.npy")
+                depth_img = np.load(session.depth_npy_path(num))
                 depth_h, depth_w = depth_img.shape
 
                 cand = verts[idx]

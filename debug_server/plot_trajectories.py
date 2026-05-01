@@ -1,11 +1,13 @@
 """
 Plot 3D trajectories of depth, RGB, and head camera poses from a debug session.
 
+Session I/O goes through ``session_io.Session`` — see that module's docstring
+for the on-disk layout and pose conventions.
+
 Usage:
     python plot_trajectories.py [session_dir]
     (defaults to the most recent session in debug_output/)
 """
-import re
 import sys
 from pathlib import Path
 
@@ -13,41 +15,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 
-
-POSE_BLOCK_RE = re.compile(
-    r"^(?P<name>depth_pose|rgb_camera_pose|head_pose)\s*\(4x4\):\s*$"
-)
-ROW_RE = re.compile(r"\[\s*([-\d.eE+]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s*\]")
-
-
-def parse_meta(path: Path):
-    """Return dict {'depth_pose': 4x4 np.array, 'rgb_camera_pose': ..., 'head_pose': ...}
-    and frame_number. Missing blocks are omitted."""
-    frame_num = None
-    poses = {}
-    with path.open() as f:
-        lines = f.readlines()
-
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        if line.startswith("frame_number:"):
-            frame_num = int(line.split(":", 1)[1].strip())
-        m = POSE_BLOCK_RE.match(line)
-        if m:
-            name = m.group("name")
-            rows = []
-            for j in range(1, 5):
-                rm = ROW_RE.search(lines[i + j])
-                if not rm:
-                    break
-                rows.append([float(x) for x in rm.groups()])
-            if len(rows) == 4:
-                poses[name] = np.array(rows, dtype=np.float64)
-            i += 4
-        i += 1
-
-    return frame_num, poses
+from session_io import Session
 
 
 def translation(m: np.ndarray) -> np.ndarray:
@@ -67,20 +35,19 @@ def main():
             sys.exit(1)
         session_dir = sessions[-1]
 
-    print(f"Session: {session_dir}")
+    session = Session(session_dir)
+    print(f"Session: {session.root}")
 
-    meta_files = sorted(session_dir.glob("meta_*.txt"))
-    print(f"Meta files: {len(meta_files)}")
+    frame_nums = session.frames_with_meta()
+    print(f"Meta files: {len(frame_nums)}")
 
     frames, depth_xyz, rgb_xyz, head_xyz = [], [], [], []
 
-    for mf in meta_files:
-        fn, poses = parse_meta(mf)
-        if fn is None:
-            continue
-        d = poses.get("depth_pose")
-        r = poses.get("rgb_camera_pose")
-        h = poses.get("head_pose")
+    for fn in frame_nums:
+        meta = session.load_meta(fn)
+        d = meta.get("depth_pose_matrix")
+        r = meta.get("rgb_camera_pose_matrix")
+        h = meta.get("head_pose_matrix")
         # Require all three for a clean comparison; fall back to what's there.
         frames.append(fn)
         depth_xyz.append(translation(d) if d is not None else [np.nan] * 3)
@@ -127,7 +94,7 @@ def main():
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
     ax.set_zlabel("Z (m)")
-    ax.set_title(f"Camera trajectories — {session_dir.name}\n"
+    ax.set_title(f"Camera trajectories — {session.root.name}\n"
                  f"(o = start, ^ = end; Unity world, right-handed on wire)")
     ax.legend(loc="upper left")
 
@@ -143,7 +110,7 @@ def main():
         ax.set_ylim(center[1] - span, center[1] + span)
         ax.set_zlim(center[2] - span, center[2] + span)
 
-    out_png = session_dir / "trajectories_3d.png"
+    out_png = session.root / "trajectories_3d.png"
     plt.tight_layout()
     plt.savefig(out_png, dpi=140)
     print(f"\nSaved: {out_png}")
@@ -164,8 +131,8 @@ def main():
         ax2.set_aspect("equal", adjustable="datalim")
         ax2.grid(True, alpha=0.3)
         ax2.legend(fontsize=8)
-    plt.suptitle(f"Trajectory projections — {session_dir.name}")
-    out_png2 = session_dir / "trajectories_2d.png"
+    plt.suptitle(f"Trajectory projections — {session.root.name}")
+    out_png2 = session.root / "trajectories_2d.png"
     plt.tight_layout()
     plt.savefig(out_png2, dpi=140)
     print(f"Saved: {out_png2}")
@@ -208,7 +175,7 @@ def main():
     add_plotly(head_xyz,  "Head (Camera.main)",  "#2ca02c")
 
     fig3.update_layout(
-        title=f"Camera trajectories — {session_dir.name}  "
+        title=f"Camera trajectories — {session.root.name}  "
               f"(Unity world, RH on wire — circle=start, diamond=end)",
         scene=dict(
             xaxis_title="X (m)",
@@ -220,7 +187,7 @@ def main():
         margin=dict(l=0, r=0, t=40, b=0),
     )
 
-    out_html = session_dir / "trajectories_3d.html"
+    out_html = session.root / "trajectories_3d.html"
     fig3.write_html(str(out_html), include_plotlyjs="cdn")
     print(f"Saved: {out_html}")
 

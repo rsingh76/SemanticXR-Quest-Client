@@ -28,7 +28,7 @@ import numpy as np
 import open3d as o3d
 from PIL import Image
 
-from reconstruct_tsdf import parse_metadata
+from session_io import Session
 
 
 # flip = diag(1,-1,-1,1) converts our on-wire RH/OpenGL camera pose
@@ -171,8 +171,8 @@ def main():
             return
         args.session_dir = str(sessions[-1])
 
-    sd = Path(args.session_dir)
-    jpg_dir = sd / "decoded_jpg"
+    session = Session(args.session_dir)
+    sd = session.root
     debug_dir = sd / "debug"
     per_frame_dir = debug_dir / "per_frame"
     want_debug = args.save_sample_aligned or args.save_pointcloud or args.save_per_frame > 0
@@ -181,20 +181,14 @@ def main():
     if args.save_per_frame > 0:
         per_frame_dir.mkdir(exist_ok=True)
 
-    depth_files = sorted(sd.glob("depth_*.npy"))
-    frames = []
-    for df in depth_files:
-        num = int(df.stem.split("_")[1])
-        if (jpg_dir / f"frame_{num:06d}.jpg").exists() and \
-           (sd / f"meta_{num:06d}.txt").exists():
-            frames.append(num)
+    frames = session.complete_frames()
     if args.frames:
         wanted = {int(x) for x in args.frames.split(",")}
         frames = [n for n in frames if n in wanted]
     print(f"Session: {sd.name}   frames: {len(frames)}")
 
-    first_meta = parse_metadata(sd / f"meta_{frames[0]:06d}.txt")
-    first_rgb = np.array(Image.open(jpg_dir / f"frame_{frames[0]:06d}.jpg").convert("RGB"))
+    first_meta = session.load_meta(frames[0])
+    first_rgb = np.array(Image.open(session.jpg_path(frames[0])).convert("RGB"))
     rgb_h, rgb_w = first_rgb.shape[:2]
 
     rgb_fx = first_meta["intr_fx"]
@@ -205,7 +199,7 @@ def main():
           f"cx={rgb_cx:.1f} cy(y-up)={rgb_cy:.1f}")
 
     # Depth resolution + intrinsics (used for TSDF integration — depth pose & intr).
-    first_depth = np.load(sd / f"depth_{frames[0]:06d}.npy")
+    first_depth = np.load(session.depth_npy_path(frames[0]))
     dh, dw = first_depth.shape
     d_fx = first_meta["depth_intr_fx"]
     d_fy = first_meta["depth_intr_fy"]
@@ -255,7 +249,7 @@ def main():
             src_frames = region_frame_set if region_frame_set else set(frames)
             cam_poss, cam_fwds = [], []
             for num in sorted(src_frames):
-                m = parse_metadata(sd / f"meta_{num:06d}.txt")
+                m = session.load_meta(num)
                 p = m.get("depth_pose_matrix")
                 if p is not None and abs(np.linalg.det(p[:3, :3])) > 0.5:
                     cam_poss.append(p[:3, 3])
@@ -295,7 +289,7 @@ def main():
 
     skipped = 0
     for i, num in enumerate(frames):
-        meta = parse_metadata(sd / f"meta_{num:06d}.txt")
+        meta = session.load_meta(num)
 
         rgb_pose = meta.get("rgb_camera_pose_matrix")
         d_pose = meta.get("depth_pose_matrix")
@@ -307,8 +301,8 @@ def main():
             skipped += 1
             continue
 
-        rgb = np.array(Image.open(jpg_dir / f"frame_{num:06d}.jpg").convert("RGB"))
-        depth_img = np.load(sd / f"depth_{num:06d}.npy").astype(np.float32)
+        rgb = np.array(Image.open(session.jpg_path(num)).convert("RGB"))
+        depth_img = np.load(session.depth_npy_path(num)).astype(np.float32)
 
         d_intr = (meta["depth_intr_fx"], meta["depth_intr_fy"],
                   meta["depth_intr_cx"], meta["depth_intr_cy"])
