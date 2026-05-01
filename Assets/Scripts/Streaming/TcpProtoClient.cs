@@ -138,6 +138,13 @@ namespace SemanticXR.Streaming
 
         int _logCounter;
 
+        // Rolling per-write timing — helps answer "is the wire the bottleneck?".
+        // Includes Stream.Write (length prefix + payload) + Flush.
+        const int WriteStatsWindow = 30;
+        double _writeMsSum;
+        int _writeMsCount;
+        double _writeMsMax;
+
         void SendFrame(FrameData f)
         {
             var msg = new UpstreamSyncMessage_quest
@@ -218,14 +225,24 @@ namespace SemanticXR.Streaming
             lenBytes[2] = (byte)(data.Length >> 8);
             lenBytes[3] = (byte)(data.Length);
 
+            double t0 = (System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency) * 1000.0;
             _stream.Write(lenBytes, 0, 4);
             _stream.Write(data, 0, data.Length);
             _stream.Flush();
+            double dt = (System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency) * 1000.0 - t0;
+            _writeMsSum += dt; _writeMsCount++;
+            if (dt > _writeMsMax) _writeMsMax = dt;
             Interlocked.Add(ref _totalBytesSent, data.Length + 4);
 
             _logCounter++;
-            if (_logCounter <= 3 || _logCounter % 30 == 0)
-                Debug.LogWarning($"[TCP] Sent frame #{f.FrameNumber}, {data.Length} bytes, total sent={SentFrames + 1}");
+            if (_logCounter <= 3 || _logCounter % WriteStatsWindow == 0)
+            {
+                double avg = _writeMsCount > 0 ? _writeMsSum / _writeMsCount : 0;
+                Debug.LogWarning($"[TCP] Sent #{f.FrameNumber} sz={data.Length}B " +
+                                 $"write_avg={avg:F1}ms write_max={_writeMsMax:F1}ms " +
+                                 $"queue={_sendQueueCount}/{MaxQueueSize} sent={SentFrames + 1}");
+                _writeMsSum = 0; _writeMsCount = 0; _writeMsMax = 0;
+            }
         }
 
         public void Stop()

@@ -28,6 +28,8 @@ namespace SemanticXR.Streaming
         bool _encoderReady;
         int _capturedCount, _encoderOutCount;
         float _lastLogTime;
+        // Cumulative-count snapshots used to compute per-window rates in [Pipeline].
+        int _lastLogCapturedCount, _lastLogEncoderOutCount, _lastLogSentCount;
 
         // --- Drop counters & validation ---
         int _droppedNoPose;
@@ -830,10 +832,23 @@ namespace SemanticXR.Streaming
 
             if (Time.time - _lastLogTime > 5f)
             {
+                // Per-stage rates over the log window — pinpoints which stage caps
+                // throughput. cap > enc means the encoder is the bottleneck;
+                // enc > sent means the transport (queue eviction) is.
+                float dt = Time.time - _lastLogTime;
+                int dCap  = _capturedCount    - _lastLogCapturedCount;
+                int dEnc  = _encoderOutCount  - _lastLogEncoderOutCount;
+                int dSent = (_tcp?.SentFrames ?? 0) - _lastLogSentCount;
                 _lastLogTime = Time.time;
+                _lastLogCapturedCount   = _capturedCount;
+                _lastLogEncoderOutCount = _encoderOutCount;
+                _lastLogSentCount       = _tcp?.SentFrames ?? 0;
+
                 int td = _droppedNoPose + _droppedNoTimestamp + _droppedBadIntrinsics + _droppedNoRgb + _droppedNoDepth;
-                Debug.LogWarning($"[Pipeline] captured={_capturedCount} encoderOut={_encoderOutCount} " +
-                                 $"sent={_tcp?.SentFrames} queue={_tcp?.QueuedFrames} " +
+                Debug.LogWarning($"[Pipeline] cap={_capturedCount}({dCap/dt:F1}fps) " +
+                                 $"enc={_encoderOutCount}({dEnc/dt:F1}fps) " +
+                                 $"sent={_tcp?.SentFrames}({dSent/dt:F1}fps) " +
+                                 $"queue={_tcp?.QueuedFrames} " +
                                  $"depth={_latestCapture.DepthWidth}x{_latestCapture.DepthHeight} connected={_tcp?.IsConnected}" +
                                  (td > 0 ? $" DROPPED={td}(pose={_droppedNoPose} ts={_droppedNoTimestamp} intr={_droppedBadIntrinsics} rgb={_droppedNoRgb} depth={_droppedNoDepth})" : ""));
             }

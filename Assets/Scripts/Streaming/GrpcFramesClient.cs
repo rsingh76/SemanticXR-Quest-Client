@@ -116,12 +116,23 @@ namespace SemanticXR.Streaming
                         try
                         {
                             var msg = BuildMessage(frame);
-                            Interlocked.Add(ref _totalBytesSent, msg.CalculateSize());
+                            int sz = msg.CalculateSize();
+                            Interlocked.Add(ref _totalBytesSent, sz);
+                            double t0 = (System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency) * 1000.0;
                             call.RequestStream.WriteAsync(msg).Wait();
+                            double dt = (System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency) * 1000.0 - t0;
+                            _writeMsSum += dt; _writeMsCount++;
+                            if (dt > _writeMsMax) _writeMsMax = dt;
                             SentFrames++;
                             _logCounter++;
-                            if (_logCounter <= 3 || _logCounter % 30 == 0)
-                                Debug.LogWarning($"[gRPC] Sent frame #{frame.FrameNumber}, total sent={SentFrames}");
+                            if (_logCounter <= 3 || _logCounter % WriteStatsWindow == 0)
+                            {
+                                double avg = _writeMsCount > 0 ? _writeMsSum / _writeMsCount : 0;
+                                Debug.LogWarning($"[gRPC] Sent #{frame.FrameNumber} sz={sz}B " +
+                                                 $"write_avg={avg:F1}ms write_max={_writeMsMax:F1}ms " +
+                                                 $"queue={_sendQueueCount}/{MaxQueueSize} sent={SentFrames}");
+                                _writeMsSum = 0; _writeMsCount = 0; _writeMsMax = 0;
+                            }
                         }
                         catch (Exception ex)
                         {
@@ -158,6 +169,14 @@ namespace SemanticXR.Streaming
         }
 
         int _logCounter;
+
+        // Rolling per-write timing — helps answer "is the wire the bottleneck?".
+        // Reset every WriteStatsWindow frames. WriteAsync time includes proto
+        // serialization and HTTP/2 handoff.
+        const int WriteStatsWindow = 30;
+        double _writeMsSum;
+        int _writeMsCount;
+        double _writeMsMax;
 
         // Mirrors TcpProtoClient.SendFrame's message-building logic so the
         // two transports produce byte-identical protobufs. Update both

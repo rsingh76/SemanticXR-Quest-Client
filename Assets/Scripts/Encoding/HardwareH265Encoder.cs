@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Threading;
 using SemanticXR.Streaming;
 using UnityEngine;
@@ -112,9 +113,16 @@ namespace SemanticXR.Encoding
             Debug.LogWarning($"[H265] Encoder ready: {_width}x{_height} @ {_bitrate}bps");
         }
 
+        // Rolling per-encode timing — surfaces input-copy / output-drain costs so
+        // we can verify optimizations actually moved the needle.
+        const int EncStatsWindow = 30;
+        double _encInMsSum, _encOutMsSum, _encTotMsSum;
+        int _encMsCount;
+
         void Encode(FrameData frame)
         {
             const int TIMEOUT = 10000;
+            double tEncStart = (System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency) * 1000.0;
 
             int inIdx = _codec.Call<int>("dequeueInputBuffer", (long)TIMEOUT);
             if (inIdx < 0) return;
@@ -135,11 +143,37 @@ namespace SemanticXR.Encoding
                 Debug.LogWarning($"[H265] in-flight map exceeded {InFlightCap}; dropped pts={oldest}");
             }
 
-            var inBufs = _codec.Call<AndroidJavaObject[]>("getInputBuffers");
-            inBufs[inIdx].Call<AndroidJavaObject>("clear");
-            inBufs[inIdx].Call<AndroidJavaObject>("put", (sbyte[])(Array)frame.H265Bytes); // NV12 raw data in H265Bytes temporarily
+            // Direct-buffer input copy:
+            //   - getInputBuffer(idx) is the API-21+ replacement for the deprecated
+            //     getInputBuffers() — no Java array allocation, no per-buffer
+            //     AndroidJavaObject wrapper churn.
+            //   - GetDirectBufferAddress returns a pointer into the buffer's native
+            //     storage, which Marshal.Copy can write straight into. This avoids
+            //     the ~2.4 MB JNI byte-array marshalling that used to dominate the
+            //     encoder loop (Unity's `Call("put", sbyte[])` does a bulk-copy via
+            //     the JNI byte[] path).
+            double tIn0 = (System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency) * 1000.0;
+            var inBuf = _codec.Call<AndroidJavaObject>("getInputBuffer", inIdx);
+            // GetDirectBufferAddress returns sbyte* on this Unity version, so
+            // the call (and the cast to IntPtr that Marshal.Copy expects) must
+            // sit inside an unsafe block. Allow-unsafe is enabled via Assets/csc.rsp.
+            IntPtr inAddr;
+            unsafe { inAddr = (IntPtr)AndroidJNI.GetDirectBufferAddress(inBuf.GetRawObject()); }
+            if (inAddr == IntPtr.Zero)
+            {
+                // MediaCodec's input buffers are always direct on Android, so this
+                // would indicate something very unexpected. Drop the frame rather
+                // than ship empty pixels.
+                Debug.LogError("[H265] getInputBuffer returned non-direct ByteBuffer; dropping frame");
+                inBuf.Dispose();
+                _inFlight.Remove(pts);
+                return;
+            }
+            Marshal.Copy(frame.H265Bytes, 0, inAddr, frame.H265Bytes.Length); // NV12 raw data in H265Bytes temporarily
+            inBuf.Dispose();
             _codec.Call("queueInputBuffer", inIdx, 0, frame.H265Bytes.Length, pts, 0);
-            foreach (var b in inBufs) b?.Dispose();
+            double tInDone = (System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency) * 1000.0;
+            _encInMsSum += tInDone - tIn0;
 
             // Drain output. MediaCodec may have multiple buffers ready after a
             // single queueInputBuffer (e.g. a CODEC_CONFIG buffer preceding the
@@ -148,6 +182,7 @@ namespace SemanticXR.Encoding
             // metadata. Skip codec-config buffers (SPS/PPS/VPS) — those are not
             // picture data and the PyAV decoder correctly produces no frame for
             // them, so shipping them wastes bandwidth and disk.
+            double tOut0 = (System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency) * 1000.0;
             const int BUFFER_FLAG_CODEC_CONFIG = 2;
             while (true)
             {
@@ -176,37 +211,40 @@ namespace SemanticXR.Encoding
                     }
                     _inFlight.Remove(outPts);
 
+                    // Direct-buffer output copy: GetDirectBufferAddress + Marshal.Copy
+                    // replaces the previous JNI NewByteArray + ByteBuffer.get() round
+                    // trip (which existed because AndroidJavaObject.Call doesn't copy
+                    // back into reference-type args). Saves ~280 KB/frame of JNI work.
                     var outBuf = _codec.Call<AndroidJavaObject>("getOutputBuffer", outIdx);
-                    outBuf.Call<AndroidJavaObject>("position", offset);
-                    outBuf.Call<AndroidJavaObject>("limit", offset + size);
-
                     byte[] encoded = new byte[size];
-
-                    // Bulk-copy the encoded payload from the Java ByteBuffer into the C#
-                    // array in a single JNI round-trip. AndroidJavaObject.Call marshals
-                    // C#->Java args but does NOT copy back mutations to reference-type
-                    // args, so passing our C# byte[] to ByteBuffer.get(byte[]) "succeeds"
-                    // while leaving the array all zeros. Drop to raw JNI: allocate a
-                    // Java-side byte[], call get() to fill it, then pull it back via
-                    // FromSByteArray. sbyte[] and byte[] share binary layout -> BlockCopy.
-                    IntPtr jArr = AndroidJNI.NewByteArray(size);
-                    try
+                    IntPtr outAddr;
+                    unsafe { outAddr = (IntPtr)AndroidJNI.GetDirectBufferAddress(outBuf.GetRawObject()); }
+                    if (outAddr != IntPtr.Zero)
                     {
-                        IntPtr outCls = AndroidJNI.GetObjectClass(outBuf.GetRawObject());
-                        IntPtr getMid = AndroidJNI.GetMethodID(outCls, "get", "([B)Ljava/nio/ByteBuffer;");
-                        AndroidJNI.DeleteLocalRef(outCls);
-
-                        jvalue[] getArgs = new jvalue[1];
-                        getArgs[0].l = jArr;
-                        IntPtr ret = AndroidJNI.CallObjectMethod(outBuf.GetRawObject(), getMid, getArgs);
-                        if (ret != IntPtr.Zero) AndroidJNI.DeleteLocalRef(ret);
-
-                        sbyte[] sarr = AndroidJNI.FromSByteArray(jArr);
-                        Buffer.BlockCopy(sarr, 0, encoded, 0, size);
+                        Marshal.Copy(outAddr + offset, encoded, 0, size);
                     }
-                    finally
+                    else
                     {
-                        AndroidJNI.DeleteLocalRef(jArr);
+                        // Defensive fallback for the (unexpected) non-direct case —
+                        // same JNI byte-array path as before. Logs once per occurrence
+                        // so we'd notice a regression in MediaCodec behavior.
+                        Debug.LogWarning("[H265] getOutputBuffer returned non-direct ByteBuffer; using JNI fallback");
+                        outBuf.Call<AndroidJavaObject>("position", offset);
+                        outBuf.Call<AndroidJavaObject>("limit", offset + size);
+                        IntPtr jArr = AndroidJNI.NewByteArray(size);
+                        try
+                        {
+                            IntPtr outCls = AndroidJNI.GetObjectClass(outBuf.GetRawObject());
+                            IntPtr getMid = AndroidJNI.GetMethodID(outCls, "get", "([B)Ljava/nio/ByteBuffer;");
+                            AndroidJNI.DeleteLocalRef(outCls);
+                            jvalue[] getArgs = new jvalue[1];
+                            getArgs[0].l = jArr;
+                            IntPtr ret = AndroidJNI.CallObjectMethod(outBuf.GetRawObject(), getMid, getArgs);
+                            if (ret != IntPtr.Zero) AndroidJNI.DeleteLocalRef(ret);
+                            sbyte[] sarr = AndroidJNI.FromSByteArray(jArr);
+                            Buffer.BlockCopy(sarr, 0, encoded, 0, size);
+                        }
+                        finally { AndroidJNI.DeleteLocalRef(jArr); }
                     }
 
                     outBuf.Dispose();
@@ -223,6 +261,19 @@ namespace SemanticXR.Encoding
                 // by the InFlightCap guard on the next queue operation.
 
                 _codec.Call("releaseOutputBuffer", outIdx, false);
+            }
+            double tEncEnd = (System.Diagnostics.Stopwatch.GetTimestamp() / (double)System.Diagnostics.Stopwatch.Frequency) * 1000.0;
+            _encOutMsSum += tEncEnd - tOut0;
+            _encTotMsSum += tEncEnd - tEncStart;
+            _encMsCount++;
+            if (_encMsCount >= EncStatsWindow)
+            {
+                Debug.LogWarning($"[H265] enc_total={_encTotMsSum/_encMsCount:F1}ms " +
+                                 $"in_copy+queue={_encInMsSum/_encMsCount:F1}ms " +
+                                 $"out_drain={_encOutMsSum/_encMsCount:F1}ms " +
+                                 $"input_q={_inCount}/{MaxQueue} inflight={_inFlight.Count}");
+                _encInMsSum = _encOutMsSum = _encTotMsSum = 0;
+                _encMsCount = 0;
             }
         }
 
