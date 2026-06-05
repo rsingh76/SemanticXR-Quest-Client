@@ -10,7 +10,7 @@ using UnityEngine.Rendering;
 
 namespace SemanticXR.Streaming
 {
-    public enum FramesTransport { Tcp, Grpc }
+    public enum FramesTransport { Tcp, Grpc, Illixr }
 
     public class StreamingOrchestrator : MonoBehaviour
     {
@@ -162,10 +162,12 @@ namespace SemanticXR.Streaming
             _depthDisabledSession = depthDisabled;
             ServerTarget = $"{address}:{port}";
 
-            _tcp = transport == FramesTransport.Grpc
-                ? (IFramesClient)new GrpcFramesClient(address, port, fps, maxDepthM, depthDisabled)
-                : new TcpProtoClient(address, port, fps, maxDepthM, depthDisabled);
-            Debug.LogWarning($"[Orchestrator] Frames transport = {transport}, max_depth_m = {maxDepthM:F2}, depth_disabled = {depthDisabled}");
+            _tcp = transport switch
+            {
+                FramesTransport.Grpc   => new GrpcFramesClient(address, port, fps, maxDepthM, depthDisabled),
+                FramesTransport.Illixr => new ILLIXRFramesClient(),
+                _                      => new TcpProtoClient(address, port, fps, maxDepthM, depthDisabled),
+            };            Debug.LogWarning($"[Orchestrator] Frames transport = {transport}, max_depth_m = {maxDepthM:F2}, depth_disabled = {depthDisabled}");
             _tcp.Start();
 
             OnConnected?.Invoke();

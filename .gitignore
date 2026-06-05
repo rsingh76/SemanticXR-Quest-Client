@@ -49,3 +49,5 @@ TempAssembly.dll
 !Assets/**/*.png    # but Unity assets under Assets/ are fine
 !Assets/**/*.jpg
 !Assets/**/*.jpeg
+
+.idea/

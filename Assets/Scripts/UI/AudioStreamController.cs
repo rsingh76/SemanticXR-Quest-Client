@@ -54,6 +54,8 @@ namespace SemanticXR.UI
         int          _actualSampleRate;    // what the mic is actually giving us
         bool         _listening;
 
+        ulong _currentQueryId;
+        
         public bool IsListening => _listening;
 
         public void Configure(string address, int port)
@@ -281,63 +283,19 @@ namespace SemanticXR.UI
             return pcm;
         }
 
-        async Task SendAudio(byte[] pcm)
+        void SendAudio(byte[] pcm)
         {
-            YetAnotherHttpHandler yaha = null;
-            GrpcChannel channel = null;
-            try
-            {
-                yaha = new YetAnotherHttpHandler
-                {
-                    // Mandatory for gRPC over cleartext — forces HTTP/2 prior
-                    // knowledge (h2c), skipping the upgrade dance.
-                    Http2Only = true,
-                };
+            _currentQueryId = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-                channel = GrpcChannel.ForAddress($"http://{_serverAddress}:{_serverPort}",
-                    new GrpcChannelOptions
-                    {
-                        HttpHandler        = yaha,
-                        MaxSendMessageSize = 100 * 1024 * 1024,
-                        DisposeHttpClient  = false,
-                    });
-                var client = new VisualizerServer.VisualizerServerClient(channel);
+            ILLIXRBridge.illixr_unity_send_voice_query(
+                _currentQueryId,
+                pcm,
+                pcm.Length,
+                _similarityThreshold,
+                _minMatchSimilarity);
 
-                var call = client.clientTextQuery();
-                try
-                {
-                    // Stamp thresholds on the first (and currently only) chunk
-                    // of each stream — server takes last-wins, so once is enough.
-                    var msg = new AudioFile
-                    {
-                        ChunkData           = ByteString.CopyFrom(pcm),
-                        SimilarityThreshold = _similarityThreshold,
-                        MinMatchSimilarity  = _minMatchSimilarity,
-                    };
-                    await call.RequestStream.WriteAsync(msg);
-                    await call.RequestStream.CompleteAsync();
-                    var response = await call.ResponseAsync;
-
-                    string statusMsg = $"Sent. System returned {response.NumPointClouds} point clouds.";
-                    Debug.Log($"[Audio] {statusMsg}");
-                    OnStatus?.Invoke(statusMsg);
-                    OnPointClouds?.Invoke(response);
-                }
-                finally
-                {
-                    call.Dispose();
-                }
-            }
-            catch (Exception e)
-            {
-                Debug.LogWarning($"[Audio] gRPC send failed: {e.Message}");
-                OnError?.Invoke($"Send failed: {e.Message}");
-            }
-            finally
-            {
-                channel?.Dispose();
-                yaha?.Dispose();
-            }
+            OnStatus?.Invoke($"Query sent ({pcm.Length / 1024} KB). Waiting for response...");
+            Debug.Log($"[Audio] Voice query sent, id={_currentQueryId}");
         }
     }
 }
