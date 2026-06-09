@@ -1,5 +1,5 @@
 using System;
-using System.Text;
+using System.Runtime.InteropServices;
 using UnityEngine;
 
 namespace SemanticXR.UI
@@ -30,18 +30,24 @@ namespace SemanticXR.UI
 
             if (result == 0) return;   // no new response
 
-            string textQuery = Encoding.UTF8.GetString(_textQueryBuf).TrimEnd('\0');
-            OnStatus?.Invoke($"Response: {numClouds} objects found. Query: '{textQuery}'");
-            Debug.Log($"[ILLIXR] Response id={queryId} numClouds={numClouds} latency={serverLatency:F3}s");
+            GCHandle handle = GCHandle.Alloc(_textQueryBuf, GCHandleType.Pinned);
+            try {
+                string textQuery = Marshal.PtrToStringUTF8(handle.AddrOfPinnedObject()) ?? string.Empty;
+                OnStatus?.Invoke($"Response: {numClouds} objects found. Query: '{textQuery}'");
+                Debug.Log($"[ILLIXR] Response id={queryId} numClouds={numClouds} latency={serverLatency:F3}s");
 
-            OnResponse?.Invoke(new QueryResponseData
-            {
-                QueryId       = queryId,
-                NumClouds     = numClouds,
-                Centroids     = _centroids,
-                ServerLatency = serverLatency,
-                TextQuery     = textQuery,
-            });
+                OnResponse?.Invoke(new QueryResponseData
+                {
+                    QueryId       = queryId,
+                    NumClouds     = numClouds,
+                    Centroids     = _centroids,
+                    ServerLatency = serverLatency,
+                    TextQuery     = textQuery,
+                });
+            }
+            finally {
+                handle.Free();
+            }
         }
     }
 

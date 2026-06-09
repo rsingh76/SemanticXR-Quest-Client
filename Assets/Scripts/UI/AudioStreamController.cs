@@ -207,7 +207,7 @@ namespace SemanticXR.UI
             OnStatus?.Invoke($"Sending {pcm.Length / 1024} KB ({seconds:F1}s)...");
             Debug.Log($"[Audio] Resampled to {resampled.Length} samples @ {ServerSampleRate} Hz ({pcm.Length} bytes), sending to {_serverAddress}:{_serverPort}");
 
-            _ = SendAudio(pcm);
+            SendAudio(pcm);
         }
 
         public void Cancel()
