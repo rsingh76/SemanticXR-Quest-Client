@@ -51,3 +51,5 @@ TempAssembly.dll
 !Assets/**/*.jpeg
 
 .idea/
+
+SemanticXR_BurstDebugInformation_DoNotShip/
