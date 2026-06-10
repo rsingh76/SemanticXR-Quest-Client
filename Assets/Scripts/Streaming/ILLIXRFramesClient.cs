@@ -29,6 +29,10 @@ namespace SemanticXR.Streaming
         {
             if (!IsConnected) return;
 
+            Debug.Log($"[ILLIXRFramesClient] Enqueue frame={f.FrameNumber} " +
+                      $"img={f.H265Bytes?.Length ?? 0}B " +
+                      $"depth={f.DepthBytes?.Length ?? 0}B");
+            
             // Unity left-handed -> right-handed (negate Z column & row),
             // same convention as TcpProtoClient.SendFrame
             float[] rgbPose   = LhToRh(f.RgbCameraPose);

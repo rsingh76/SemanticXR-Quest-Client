@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Cysharp.Net.Http;
 using Grpc.Core;
@@ -287,13 +288,33 @@ namespace SemanticXR.UI
         {
             _currentQueryId = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
-            ILLIXRBridge.illixr_unity_send_voice_query(
-                _currentQueryId,
-                pcm,
-                pcm.Length,
-                _similarityThreshold,
-                _minMatchSimilarity);
+            if (pcm == null || pcm.Length == 0)
+            {
+                Debug.LogError("[Audio] send_voice_query: pcm is null or empty — aborting");
+                return;
+            }
+            
+            GCHandle pcmHandle = GCHandle.Alloc(pcm, GCHandleType.Pinned);
+            try
+            {
+                IntPtr pcmPtr = pcmHandle.AddrOfPinnedObject();
+                Debug.Log($"[Audio] send_voice_query: queryId={_currentQueryId} " +
+                          $"pcm ptr=0x{pcmPtr.ToInt64():X} " +
+                          $"pcmLen={pcm.Length} " +
+                          $"simThresh={_similarityThreshold} " +
+                          $"minMatch={_minMatchSimilarity}");
 
+                ILLIXRBridge.illixr_unity_send_voice_query(
+                    _currentQueryId,
+                    pcm,
+                    pcm.Length,
+                    _similarityThreshold,
+                    _minMatchSimilarity);
+            }
+            finally
+            {
+                pcmHandle.Free();
+            }
             OnStatus?.Invoke($"Query sent ({pcm.Length / 1024} KB). Waiting for response...");
             Debug.Log($"[Audio] Voice query sent, id={_currentQueryId}");
         }

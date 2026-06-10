@@ -1,9 +1,11 @@
 using System;
+using System.Collections;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using Meta.XR;
 using Meta.XR.EnvironmentDepth;
 using SemanticXR.Encoding;
+using SemanticXR.UI;
 using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -49,6 +51,8 @@ namespace SemanticXR.Streaming
         FieldInfo _frameDescCreateTimeField; // DepthFrameDesc.createTime (may not exist on older SDKs)
         FieldInfo _camTimestampNsField;      // PassthroughCameraAccess._timestampNsMonotonic (private)
 
+        ILLIXRManager _illixr;
+        
         // NOTE: We considered using MRUKNativeFuncs.GetHeadsetPoseAtTime(long ns) which takes
         // nanoseconds directly with zero precision loss. However, Meta's own GetCameraPose()
         // never calls it — they only use it as a "native library loaded?" guard, then call
@@ -131,6 +135,9 @@ namespace SemanticXR.Streaming
         // TimingLine. 0 until the first stats window completes.
         public float CaptureFps { get; private set; }
 
+        ILLIXRResponsePoller          _poller;
+        public event Action<QueryResponseData> OnQueryResponse;
+        
         public event Action OnConnected;
         public event Action OnDisconnected;
         public event Action<string> OnError;
@@ -185,6 +192,27 @@ namespace SemanticXR.Streaming
         void Start()
         {
             _cam = FindAnyObjectByType<PassthroughCameraAccess>();
+            
+            if (_cam == null)
+            {
+                Debug.LogError("[Orchestrator] No PassthroughCameraAccess found!");
+                return;
+            }
+    
+            Debug.Log($"[Orchestrator] Camera found: {_cam.name} " +
+                      $"IsPlaying={_cam.IsPlaying} " +
+                      $"enabled={_cam.enabled} " +
+                      $"activeInHierarchy={_cam.gameObject.activeInHierarchy}");
+              
+            // Log permission state
+            Debug.Log($"[Orchestrator] Camera permission granted=" +
+                      $"{OVRPermissionsRequester.IsPermissionGranted(OVRPermissionsRequester.Permission.PassthroughCameraAccess)}");
+              
+            // Start coroutine to monitor when IsPlaying becomes true
+            StartCoroutine(WaitForCamera());
+            
+            _illixr = gameObject.AddComponent<ILLIXRManager>();
+            
             if (_cam == null)
                 Debug.LogError("[Orchestrator] No PassthroughCameraAccess found!");
 
@@ -193,8 +221,46 @@ namespace SemanticXR.Streaming
 
             // Disable the CameraToWorld demo UI elements
             DisableDemoUI();
+            // Create ILLIXR manager on this GameObject
+            _illixr = gameObject.AddComponent<ILLIXRManager>();
+
+            // Create response poller on a persistent child object
+            var pollerObj = new GameObject("ILLIXRResponsePoller");
+            pollerObj.transform.SetParent(transform);
+            _poller = pollerObj.AddComponent<ILLIXRResponsePoller>();
+            _poller.OnResponse += HandleQueryResponse;
+            _poller.OnStatus += status => Debug.Log($"[ILLIXR] {status}");
+
+            Debug.Log("[StreamingOrchestrator] ILLIXR components created");
         }
 
+        IEnumerator WaitForCamera()
+        {
+            float elapsed = 0f;
+            while (!_cam.IsPlaying && elapsed < 30f)
+            {
+                elapsed += Time.deltaTime;
+                if (Time.frameCount % 60 == 0)
+                    Debug.Log($"[Orchestrator] Waiting for camera... elapsed={elapsed:F1}s " +
+                              $"IsPlaying={_cam.IsPlaying} " +
+                              $"permission={OVRPermissionsRequester.IsPermissionGranted(OVRPermissionsRequester.Permission.PassthroughCameraAccess)}");
+                yield return null;
+            }
+    
+            if (_cam.IsPlaying)
+                Debug.Log($"[Orchestrator] Camera is now playing after {elapsed:F1}s");
+            else
+                Debug.LogError($"[Orchestrator] Camera never started after {elapsed:F1}s");
+        }
+        
+        void HandleQueryResponse(QueryResponseData data)
+        {
+            Debug.Log($"[StreamingOrchestrator] Query response: " +
+                      $"id={data.QueryId} clouds={data.NumClouds} " +
+                      $"text='{data.TextQuery}'");
+            OnQueryResponse?.Invoke(data);
+        }
+        
         void SetupDepth()
         {
             _depthManager = FindAnyObjectByType<EnvironmentDepthManager>();
@@ -784,6 +850,12 @@ namespace SemanticXR.Streaming
 
         void Update()
         {
+            if (Time.frameCount % 60 == 0)
+                Debug.Log($"[Update] _tcp={_tcp != null} _cam={_cam != null} " +
+                          $"playing={_cam?.IsPlaying} transport={Transport} " +
+                          $"captureInterval={_captureInterval} " +
+                          $"timeSinceCapture={Time.time - _lastCaptureTime:F2}");
+            
             if (_tcp == null || _cam == null || !_cam.IsPlaying) return;
 
             // Run one-time validation after camera warmup
@@ -933,6 +1005,7 @@ namespace SemanticXR.Streaming
         void ForwardEncoded()
         {
             if (_encoder == null || _tcp == null) return;
+            Debug.Log($"[StreamingOrchestrator] Enqueue transport={Transport} connected={_tcp?.IsConnected}");
             while (_encoder.OutputQueue.TryDequeue(out var f))
             {
                 _encoderOutCount++;
@@ -976,6 +1049,72 @@ namespace SemanticXR.Streaming
             return nv12;
         }
 
+        public void ConnectIllixr(string serverIp, int serverPort, int clientPort,
+            int fps, float maxDepthM, bool depthDisabled)
+        {
+            StartCoroutine(ConnectIllixrCoroutine(serverIp, serverPort, clientPort,
+                fps, maxDepthM, depthDisabled));
+        }
+
+        IEnumerator ConnectIllixrCoroutine(string serverIp, int serverPort, int clientPort,
+            int fps, float maxDepthM, bool depthDisabled)
+        {
+            Debug.Log("[StreamingOrchestrator] Starting ILLIXR init...");
+
+            bool done    = false;
+            bool success = false;
+            string clientIp = GetLocalIP();
+
+            // Run blocking ILLIXR init off the main thread so PassthroughCameraAccess
+            // can continue its normal update loop during initialization
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                try
+                {
+                    _illixr.Initialize(serverIp, serverPort, clientIp, clientPort);
+                    success = _illixr.IsInitialized;
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogError($"[StreamingOrchestrator] ILLIXR init exception: {e.Message}");
+                }
+                finally
+                {
+                    done = true;
+                }
+            });
+
+            // Yield each frame — main thread stays free, camera keeps running
+            float timeout = 10f;
+            float elapsed = 0f;
+            while (!done)
+            {
+                elapsed += Time.deltaTime;
+                if (elapsed >= timeout)
+                {
+                    OnError?.Invoke("ILLIXR init timed out");
+                    yield break;
+                }
+                yield return null;
+            }
+
+            if (!success)
+            {
+                OnError?.Invoke("ILLIXR runtime failed to initialize");
+                yield break;
+            }
+
+            Debug.Log("[StreamingOrchestrator] ILLIXR init complete, connecting...");
+            Connect(serverIp, serverPort, fps, maxDepthM, depthDisabled);
+        }        
+        static string GetLocalIP()
+        {
+            using var s = new System.Net.Sockets.Socket(
+                System.Net.Sockets.AddressFamily.InterNetwork,
+                System.Net.Sockets.SocketType.Dgram, 0);
+            s.Connect("8.8.8.8", 65530);
+            return (s.LocalEndPoint as System.Net.IPEndPoint)?.Address.ToString() ?? "127.0.0.1";
+        }
         void OnDestroy() => Disconnect();
     }
 }

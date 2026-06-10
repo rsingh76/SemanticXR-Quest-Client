@@ -46,6 +46,7 @@ namespace SemanticXR.UI
             ("Debug Laptop (Home)",   "192.168.1.2"),
             ("Everglades", "10.195.21.84"),
             ("Debug Laptop (Lab)", "10.193.43.94"),
+            ("Lab Server (ILLIXR)", "10.193.192.179"),
         };
         int _ipIndex;
         string _ipAddress;
@@ -55,12 +56,22 @@ namespace SemanticXR.UI
         // debug/prod lives at 50051. TCP debug server moves to 50055.
         const string DefaultTcpPort  = "50055";
         const string DefaultGrpcPort = "50051";
+        const string DefaultIllixrServerPort = "50057";
+        const string DefaultIllixrClientPort = "50058";
+        
         string _portString = DefaultGrpcPort;   // initial value updated in Awake based on orchestrator's transport
         TextMeshProUGUI _portLabel;
 
         string _audioPortString = "50054";
         TextMeshProUGUI _audioPortLabel;
 
+        string          _illixrServerPort    = DefaultIllixrServerPort;
+        string          _illixrClientPort    = DefaultIllixrClientPort;
+        TextMeshProUGUI _illixrServerPortLabel;
+        TextMeshProUGUI _illixrClientPortLabel;
+        GameObject      _tcpGrpcConfigRows;
+        GameObject      _illixrConfigRows;
+        
         static readonly int[] FpsOptions = { 2, 3, 5, 6, 7, 10, 15, 20, 25 };
         int _fpsIndex;
         int _selectedFps = 2;
@@ -130,6 +141,7 @@ namespace SemanticXR.UI
             _audio.OnListeningChanged  += OnDictationListeningChanged;
             _audio.OnError             += OnDictationErrorReceived;
             _audio.OnPointClouds       += OnPointCloudsReceived;
+            _orchestrator.OnQueryResponse += OnIllixrQueryResponseReceived;
 
             // Point-cloud visualizer lives on a separate child GameObject so
             // spheres are parented there, not on the StreamCanvas.
@@ -355,19 +367,74 @@ namespace SemanticXR.UI
             Mk.Btn(_connectPanel.transform, "Custom", new Vector2(150, 85), new Vector2(80, 30), new Color(0.3f, 0.3f, 0.4f), 14, () => OpenKB("ip"));
 
             // Row 2: three columns — frames port (TCP/gRPC), audio port (gRPC VisualizerServer), and Transport toggle.
-            Mk.Label(_connectPanel.transform, "Frames Port", new Vector2(-175, 45), 16, new Color(0.6f, 0.6f, 0.65f));
-            _portLabel = Mk.Label(_connectPanel.transform, _portString, new Vector2(-175, 17), 20, Color.white);
-            Mk.Btn(_connectPanel.transform, "", new Vector2(-175, 17), new Vector2(160, 30), new Color(0.2f, 0.2f, 0.25f, 0.5f), 0, () => OpenKB("port"));
+            var framesPortGroup = Mk.Panel(_connectPanel.transform, "FramesPortGroup", Color.clear);
+            framesPortGroup.GetComponent<RectTransform>().anchoredPosition = new Vector2(-175, 17);
+            framesPortGroup.GetComponent<RectTransform>().sizeDelta = new Vector2(160, 50);
+            Mk.Label(framesPortGroup.transform, "Frames Port", new Vector2(0, 20), 16, new Color(0.6f, 0.6f, 0.65f));
+            _portLabel = Mk.Label(framesPortGroup.transform, _portString, Vector2.zero, 20, Color.white);
+            Mk.Btn(framesPortGroup.transform, "", Vector2.zero, new Vector2(160, 30),
+                new Color(0.2f, 0.2f, 0.25f, 0.5f), 0, () => OpenKB("port"));
 
-            Mk.Label(_connectPanel.transform, "Audio Port", new Vector2(0, 45), 16, new Color(0.6f, 0.6f, 0.65f));
-            _audioPortLabel = Mk.Label(_connectPanel.transform, _audioPortString, new Vector2(0, 17), 20, Color.white);
-            Mk.Btn(_connectPanel.transform, "", new Vector2(0, 17), new Vector2(160, 30), new Color(0.2f, 0.2f, 0.25f, 0.5f), 0, () => OpenKB("audioPort"));
+            // Audio port group
+            var audioPortGroup = Mk.Panel(_connectPanel.transform, "AudioPortGroup", Color.clear);
+            audioPortGroup.GetComponent<RectTransform>().anchoredPosition = new Vector2(0, 17);
+            audioPortGroup.GetComponent<RectTransform>().sizeDelta = new Vector2(160, 50);
+            Mk.Label(audioPortGroup.transform, "Audio Port", new Vector2(0, 20), 16, new Color(0.6f, 0.6f, 0.65f));
+            _audioPortLabel = Mk.Label(audioPortGroup.transform, _audioPortString, Vector2.zero, 20, Color.white);
+            Mk.Btn(audioPortGroup.transform, "", Vector2.zero, new Vector2(160, 30),
+                new Color(0.2f, 0.2f, 0.25f, 0.5f), 0, () => OpenKB("audioPort"));
 
+            _tcpGrpcConfigRows = Mk.Panel(_connectPanel.transform, "TcpGrpcRows", Color.clear);
+            framesPortGroup.transform.SetParent(_tcpGrpcConfigRows.transform, false);
+            audioPortGroup.transform.SetParent(_tcpGrpcConfigRows.transform, false);
+            
             Mk.Label(_connectPanel.transform, "Transport", new Vector2(175, 45), 16, new Color(0.6f, 0.6f, 0.65f));
             _transportBtn = Mk.Btn(_connectPanel.transform, _orchestrator.Transport.ToString(),
                 new Vector2(175, 17), new Vector2(160, 30),
                 new Color(0.3f, 0.3f, 0.4f), 16, ToggleTransport);
             _transportLabel = _transportBtn.GetComponentInChildren<TextMeshProUGUI>();
+
+            // Wrap existing Frames Port + Audio Port labels into a hideable container
+            // so they disappear when ILLIXR transport is selected.
+            // The labels were already parented to _connectPanel by Mk.Label/Btn above,
+            // so we re-parent their immediate parents (the button GameObjects) here.
+            _tcpGrpcConfigRows = Mk.Panel(_connectPanel.transform, "TcpGrpcRows", Color.clear);
+            {
+                var r = _tcpGrpcConfigRows.GetComponent<RectTransform>();
+                r.anchoredPosition = Vector2.zero;
+                r.sizeDelta        = new Vector2(590, 70);
+            }
+            _portLabel.transform.parent.SetParent(_tcpGrpcConfigRows.transform, false);
+            _audioPortLabel.transform.parent.SetParent(_tcpGrpcConfigRows.transform, false);
+
+            // ILLIXR config rows: server port + client port.
+            // Server IP reuses the existing _ipAddress / IpPresets dropdown.
+            // Client IP is auto-detected from the headset's active network interface.
+            _illixrConfigRows = Mk.Panel(_connectPanel.transform, "IllixrRows", Color.clear);
+            {
+                var r = _illixrConfigRows.GetComponent<RectTransform>();
+                r.anchoredPosition = new Vector2(0, 17);
+                r.sizeDelta        = new Vector2(590, 70);
+            }
+
+            Mk.Label(_illixrConfigRows.transform, "Server Port",
+                new Vector2(-175, 20), 16, new Color(0.6f, 0.6f, 0.65f));
+            _illixrServerPortLabel = Mk.Label(_illixrConfigRows.transform,
+                _illixrServerPort, new Vector2(-175, -5), 20, Color.white);
+            Mk.Btn(_illixrConfigRows.transform, "", new Vector2(-175, -5),
+                new Vector2(160, 30), new Color(0.2f, 0.2f, 0.25f, 0.5f), 0,
+                () => OpenKB("illixrServerPort"));
+
+            Mk.Label(_illixrConfigRows.transform, "Client Port",
+                new Vector2(0, 20), 16, new Color(0.6f, 0.6f, 0.65f));
+            _illixrClientPortLabel = Mk.Label(_illixrConfigRows.transform,
+                _illixrClientPort, new Vector2(0, -5), 20, Color.white);
+            Mk.Btn(_illixrConfigRows.transform, "", new Vector2(0, -5),
+                new Vector2(160, 30), new Color(0.2f, 0.2f, 0.25f, 0.5f), 0,
+                () => OpenKB("illixrClientPort"));
+
+            // Hidden by default — TCP is the default transport
+            _illixrConfigRows.SetActive(false);
 
             Mk.Label(_connectPanel.transform, "FPS", new Vector2(-150, -35), 16, new Color(0.6f, 0.6f, 0.65f), TextAlignmentOptions.MidlineRight, 160);
             var fpsStrings = new string[FpsOptions.Length];
@@ -540,17 +607,32 @@ namespace SemanticXR.UI
 
         void ToggleTransport()
         {
-            _orchestrator.Transport = _orchestrator.Transport == FramesTransport.Tcp
-                ? FramesTransport.Grpc : FramesTransport.Tcp;
-            if (_transportLabel != null) _transportLabel.text = _orchestrator.Transport.ToString();
-            // Auto-snap the frames port to the new transport's default.
+            _orchestrator.Transport = _orchestrator.Transport switch
+            {
+                FramesTransport.Tcp   => FramesTransport.Grpc,
+                FramesTransport.Grpc  => FramesTransport.Illixr,
+                _                     => FramesTransport.Tcp,
+            };
+            if (_transportLabel != null)
+                _transportLabel.text = _orchestrator.Transport.ToString();
+
+            bool isIllixr = _orchestrator.Transport == FramesTransport.Illixr;
             _portString = DefaultPortFor(_orchestrator.Transport);
             if (_portLabel != null) _portLabel.text = _portString;
-            Debug.Log($"[StreamingUI] Transport → {_orchestrator.Transport}, port → {_portString}");
+
+            if (_tcpGrpcConfigRows != null) _tcpGrpcConfigRows.SetActive(!isIllixr);
+            if (_illixrConfigRows  != null) _illixrConfigRows.SetActive(isIllixr);
+
+            Debug.Log($"[StreamingUI] Transport → {_orchestrator.Transport}");
         }
 
-        static string DefaultPortFor(FramesTransport t) =>
-            t == FramesTransport.Grpc ? DefaultGrpcPort : DefaultTcpPort;
+        static string DefaultPortFor(FramesTransport t) => t switch
+        {
+            FramesTransport.Grpc   => DefaultGrpcPort,
+            FramesTransport.Illixr => "",
+            _                      => DefaultTcpPort,
+        };
+        
         void OpenKB(string field)
         {
             _editField = field;
@@ -559,6 +641,8 @@ namespace SemanticXR.UI
                 "ip"        => _ipAddress,
                 "port"      => _portString,
                 "audioPort" => _audioPortString,
+                "illixrServerPort" => _illixrServerPort,
+                "illixrClientPort" => _illixrClientPort,
                 _           => ""
             };
             _keyboard = TouchScreenKeyboard.Open(
@@ -567,14 +651,31 @@ namespace SemanticXR.UI
         void OnConnect()
         {
             _errorText.text = "";
-            if (string.IsNullOrEmpty(_ipAddress)) { ShowError("Enter IP"); return; }
-            if (!int.TryParse(_portString, out int port) || port < 1 || port > 65535) { ShowError("Invalid port"); return; }
-            _connectBtn.interactable = false;
-            _errorText.text = "Connecting...";
-            float maxDepthM = _connectSettings != null ? _connectSettings.WireValue : 0f;
+            bool isIllixr  = _orchestrator.Transport == FramesTransport.Illixr;
+            float maxDepthM    = _connectSettings != null ? _connectSettings.WireValue : 0f;
             bool depthDisabled = _connectSettings != null && !_connectSettings.DepthEnabled;
-            _orchestrator.Connect(_ipAddress, port, _selectedFps, maxDepthM, depthDisabled);
-        }
+
+            if (isIllixr)
+            {
+                if (!int.TryParse(_illixrServerPort, out int sp) || sp < 1 || sp > 65535)
+                { ShowError("Invalid server port"); return; }
+                if (!int.TryParse(_illixrClientPort, out int cp) || cp < 1 || cp > 65535)
+                { ShowError("Invalid client port"); return; }
+                _connectBtn.interactable = false;
+                _errorText.text = "Connecting...";
+                // Server IP reuses _ipAddress from the existing dropdown.
+                // Client IP is auto-detected inside ConnectIllixr().
+                _orchestrator.ConnectIllixr(_ipAddress, sp, cp, _selectedFps, maxDepthM, depthDisabled);
+            }
+            else
+            {
+                if (string.IsNullOrEmpty(_ipAddress)) { ShowError("Enter IP"); return; }
+                if (!int.TryParse(_portString, out int port) || port < 1 || port > 65535)
+                { ShowError("Invalid port"); return; }
+                _connectBtn.interactable = false;
+                _errorText.text = "Connecting...";
+                _orchestrator.Connect(_ipAddress, port, _selectedFps, maxDepthM, depthDisabled);
+            }        }
         void ShowConnect()
         {
             ResetDictation();
@@ -682,6 +783,45 @@ namespace SemanticXR.UI
             if (_dictationText != null) _dictationText.text = msg;
         }
 
+        void OnIllixrQueryResponseReceived(QueryResponseData data)
+        {
+            if (data == null) return;
+
+            var response = new XrVis.allPointClouds
+            {
+                TextQuery             = data.TextQuery ?? "",
+                ServerQueryProcessing = data.ServerLatency * 1000f,  // seconds → ms
+                NumPointClouds        = data.NumClouds,
+            };
+
+            for (int i = 0; i < data.NumClouds; i++)
+            {
+                var pc = new XrVis.PointCloud
+                {
+                    NumPoints = 1,
+                };
+
+                if (data.Centroids != null && data.Centroids.Length >= (i + 1) * 3)
+                {
+                    pc.Centroid.Add(data.Centroids[i * 3]);
+                    pc.Centroid.Add(data.Centroids[i * 3 + 1]);
+                    pc.Centroid.Add(data.Centroids[i * 3 + 2]);
+
+                    pc.Points.Add(data.Centroids[i * 3]);
+                    pc.Points.Add(data.Centroids[i * 3 + 1]);
+                    pc.Points.Add(data.Centroids[i * 3 + 2]);
+                }
+
+                response.PointClouds.Add(pc);
+            }
+
+            if (data.Colors != null)
+                foreach (var c in data.Colors)
+                    response.Colors.Add(c);
+
+            OnPointCloudsReceived(response);
+        }
+        
         void ClearPoints()
         {
             _visualizer?.Clear();
@@ -747,9 +887,27 @@ namespace SemanticXR.UI
                 {
                     switch (_editField)
                     {
-                        case "ip":        _ipAddress       = _keyboard.text; _ipDropdown.label.text = "Custom"; if (_ipDropdown.subLabel != null) _ipDropdown.subLabel.text = _ipAddress; break;
-                        case "audioPort": _audioPortString = _keyboard.text; _audioPortLabel.text = _audioPortString; break;
-                        default:          _portString      = _keyboard.text; _portLabel.text      = _portString;      break;
+                        case "ip":
+                            _ipAddress = _keyboard.text;
+                            _ipDropdown.label.text = "Custom";
+                            if (_ipDropdown.subLabel != null) _ipDropdown.subLabel.text = _ipAddress;
+                            break;
+                        case "audioPort":
+                            _audioPortString = _keyboard.text;
+                            _audioPortLabel.text = _audioPortString;
+                            break;
+                        case "illixrServerPort":
+                            _illixrServerPort = _keyboard.text;
+                            if (_illixrServerPortLabel != null) _illixrServerPortLabel.text = _illixrServerPort;
+                            break;
+                        case "illixrClientPort":
+                            _illixrClientPort = _keyboard.text;
+                            if (_illixrClientPortLabel != null) _illixrClientPortLabel.text = _illixrClientPort;
+                            break;
+                        default:
+                            _portString = _keyboard.text;
+                            _portLabel.text = _portString;
+                            break;
                     }
                 }
                 if (_keyboard.status != TouchScreenKeyboard.Status.Visible)

@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Runtime.InteropServices;
 using UnityEngine;
 
@@ -15,40 +16,53 @@ namespace SemanticXR.UI
         const int MaxPointClouds  = 64;
         const int TextQueryBufLen = 512;
 
-        readonly float[]  _centroids     = new float[MaxPointClouds * 3];
-        readonly byte[]   _textQueryBuf  = new byte[TextQueryBufLen];
+        readonly float[] _centroids     = new float[MaxPointClouds * 3];
+        readonly float[] _colors     = new float[MaxPointClouds];
+        readonly byte[]  _textQueryBuf  = new byte[TextQueryBufLen];
 
         void Update()
         {
+            // Log every N frames to avoid flooding — adjust as needed
+            bool log_this_frame = Time.frameCount % 60 == 0;
+
+            if (log_this_frame)
+                Debug.Log($"[ILLIXRResponsePoller] Polling... frame={Time.frameCount}");
+
             int result = ILLIXRBridge.illixr_unity_get_query_response(
                 out ulong queryId,
                 _centroids,
                 out int numClouds,
+                _colors,
+                MaxPointClouds,
                 out float serverLatency,
                 _textQueryBuf,
                 TextQueryBufLen);
 
-            if (result == 0) return;   // no new response
+            if (log_this_frame)
+                Debug.Log($"[ILLIXRResponsePoller] Poll result={result}");
 
-            GCHandle handle = GCHandle.Alloc(_textQueryBuf, GCHandleType.Pinned);
-            try {
-                string textQuery = Marshal.PtrToStringUTF8(handle.AddrOfPinnedObject()) ?? string.Empty;
-                OnStatus?.Invoke($"Response: {numClouds} objects found. Query: '{textQuery}'");
-                Debug.Log($"[ILLIXR] Response id={queryId} numClouds={numClouds} latency={serverLatency:F3}s");
+            if (result == 0) return;
 
-                OnResponse?.Invoke(new QueryResponseData
-                {
-                    QueryId       = queryId,
-                    NumClouds     = numClouds,
-                    Centroids     = _centroids,
-                    ServerLatency = serverLatency,
-                    TextQuery     = textQuery,
-                });
-            }
-            finally {
-                handle.Free();
-            }
+            string textQuery = System.Text.Encoding.UTF8.GetString(_textQueryBuf).TrimEnd('\0');
+            Debug.Log($"[ILLIXRResponsePoller] Response received: " +
+                      $"queryId={queryId} " +
+                      $"numClouds={numClouds} " +
+                      $"serverLatency={serverLatency:F3} " +
+                      $"textQuery='{textQuery}' " +
+                      $"centroids=[{string.Join(", ", _centroids.Take(numClouds * 3).Select(f => f.ToString("F3")))}]");
+
+            OnStatus?.Invoke($"Response: {numClouds} objects found. Query: '{textQuery}'");
+            OnResponse?.Invoke(new QueryResponseData
+            {
+                QueryId       = queryId,
+                NumClouds     = numClouds,
+                Centroids     = _centroids,
+                Colors        = _colors,
+                ServerLatency = serverLatency,
+                TextQuery     = textQuery,
+            });
         }
+        
     }
 
     // Mirrors allPointClouds from protobuf — used by existing UI handlers
@@ -57,6 +71,7 @@ namespace SemanticXR.UI
         public ulong   QueryId;
         public int     NumClouds;
         public float[] Centroids;   // flat [x0,y0,z0, x1,y1,z1, ...]
+        public float[] Colors;
         public float   ServerLatency;
         public string  TextQuery;
     }
