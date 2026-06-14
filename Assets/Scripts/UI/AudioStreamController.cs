@@ -7,13 +7,21 @@ using Grpc.Net.Client;
 using Google.Protobuf;
 using UnityEngine;
 using XrVis;
+using SemanticXR.Streaming;
 
 namespace SemanticXR.UI
 {
     // Captures mic audio with UnityEngine.Microphone, encodes it as 12 kHz /
-    // mono / 16-bit PCM (matching visualization_service.py), and sends it in a
-    // single AudioFile message to VisualizerServer.clientTextQuery when the
-    // user taps stop.
+    // mono / 16-bit PCM (matching visualization_service.py), and ships it when
+    // the user stops recording. The send path mirrors the frame transport
+    // selected in StreamingOrchestrator (set via Configure):
+    //
+    //   Grpc / Tcp -> SendAudioGrpc: a single AudioFile on
+    //     VisualizerServer.clientTextQuery; the response returns inline and is
+    //     surfaced through OnPointClouds.
+    //   Illixr     -> SendAudioIllixr: hand the PCM to the native runtime
+    //     (illixr_unity_send_voice_query); the response returns asynchronously
+    //     via ILLIXRResponsePoller -> StreamingOrchestrator.OnQueryResponse.
     //
     // gRPC transport: Grpc.Net.Client + Cysharp.Net.Http.YetAnotherHttpHandler
     // (YAHA). Unity's Mono runtime doesn't have a working HTTP/2 stack, so
@@ -30,6 +38,9 @@ namespace SemanticXR.UI
 
         string _serverAddress;
         int    _serverPort;
+        // Which frame transport the session connected with. Decides whether a
+        // voice query goes over gRPC (Grpc/Tcp) or the ILLIXR native bridge.
+        FramesTransport _transport = FramesTransport.Grpc;
 
         // Per-query thresholds stamped on the outgoing AudioFile. Server
         // honors these as overrides of its YAML defaults; we always send both.
@@ -59,16 +70,22 @@ namespace SemanticXR.UI
         
         public bool IsListening => _listening;
 
-        public void Configure(string address, int port)
+        // address/port are the gRPC VisualizerServer endpoint (Grpc/Tcp modes).
+        // In Illixr mode they are unused — the native runtime already knows its
+        // peer — but transport is always required so SendAudio routes correctly.
+        public void Configure(string address, int port, FramesTransport transport)
         {
             _serverAddress = address;
             _serverPort    = port;
+            _transport     = transport;
         }
 
         public void StartListening()
         {
             if (_listening) return;
-            if (string.IsNullOrEmpty(_serverAddress))
+            // gRPC/Tcp need a server address; ILLIXR routes through the native
+            // runtime and has no address to validate here.
+            if (_transport != FramesTransport.Illixr && string.IsNullOrEmpty(_serverAddress))
             {
                 OnError?.Invoke("System address not set — connect first");
                 return;
@@ -284,16 +301,92 @@ namespace SemanticXR.UI
             return pcm;
         }
 
+        // Route the encoded PCM to whichever transport the session connected
+        // with. The two paths return their responses differently (see header):
+        // gRPC inline via OnPointClouds, ILLIXR async via the response poller.
         void SendAudio(byte[] pcm)
         {
-            _currentQueryId = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
             if (pcm == null || pcm.Length == 0)
             {
                 Debug.LogError("[Audio] send_voice_query: pcm is null or empty — aborting");
                 return;
             }
-            
+
+            if (_transport == FramesTransport.Illixr)
+                SendAudioIllixr(pcm);
+            else
+                _ = SendAudioGrpc(pcm);
+        }
+
+        // gRPC/Tcp transport: stream a single AudioFile to the VisualizerServer
+        // and await the point-cloud response on the same call. Mono lacks a
+        // working HTTP/2 stack, so YAHA's native handler backs the channel.
+        async Task SendAudioGrpc(byte[] pcm)
+        {
+            YetAnotherHttpHandler yaha = null;
+            GrpcChannel channel = null;
+            try
+            {
+                yaha = new YetAnotherHttpHandler
+                {
+                    // Mandatory for gRPC over cleartext — forces HTTP/2 prior
+                    // knowledge (h2c), skipping the upgrade dance.
+                    Http2Only = true,
+                };
+
+                channel = GrpcChannel.ForAddress($"http://{_serverAddress}:{_serverPort}",
+                    new GrpcChannelOptions
+                    {
+                        HttpHandler        = yaha,
+                        MaxSendMessageSize = 100 * 1024 * 1024,
+                        DisposeHttpClient  = false,
+                    });
+                var client = new VisualizerServer.VisualizerServerClient(channel);
+
+                var call = client.clientTextQuery();
+                try
+                {
+                    // Stamp thresholds on the first (and currently only) chunk
+                    // of each stream — server takes last-wins, so once is enough.
+                    var msg = new AudioFile
+                    {
+                        ChunkData           = ByteString.CopyFrom(pcm),
+                        SimilarityThreshold = _similarityThreshold,
+                        MinMatchSimilarity  = _minMatchSimilarity,
+                    };
+                    await call.RequestStream.WriteAsync(msg);
+                    await call.RequestStream.CompleteAsync();
+                    var response = await call.ResponseAsync;
+
+                    string statusMsg = $"Sent. System returned {response.NumPointClouds} point clouds.";
+                    Debug.Log($"[Audio] {statusMsg}");
+                    OnStatus?.Invoke(statusMsg);
+                    OnPointClouds?.Invoke(response);
+                }
+                finally
+                {
+                    call.Dispose();
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[Audio] gRPC send failed: {e.Message}");
+                OnError?.Invoke($"Send failed: {e.Message}");
+            }
+            finally
+            {
+                channel?.Dispose();
+                yaha?.Dispose();
+            }
+        }
+
+        // ILLIXR transport: hand the PCM to the native runtime, which streams it
+        // over ILLIXR's own backend. The response returns asynchronously through
+        // ILLIXRResponsePoller -> StreamingOrchestrator.OnQueryResponse, not here.
+        void SendAudioIllixr(byte[] pcm)
+        {
+            _currentQueryId = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
             GCHandle pcmHandle = GCHandle.Alloc(pcm, GCHandleType.Pinned);
             try
             {

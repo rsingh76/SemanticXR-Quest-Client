@@ -12,6 +12,13 @@ namespace SemanticXR.UI
         public event Action<QueryResponseData> OnResponse;
         public event Action<string>            OnStatus;
 
+        // Gate for the native poll. The runtime is only initialized for an
+        // ILLIXR-connected session; in gRPC/Tcp sessions (or before any
+        // connect) illixr_unity_get_query_response would P/Invoke into an
+        // uninitialized runtime every frame. The orchestrator sets this true
+        // only while connected over the ILLIXR transport.
+        public bool Active { get; set; }
+
         // Max point clouds we allocate for per poll — resize if needed
         const int MaxPointClouds  = 64;
         const int TextQueryBufLen = 512;
@@ -22,6 +29,10 @@ namespace SemanticXR.UI
 
         void Update()
         {
+            // Only poll when the ILLIXR runtime is up (see Active). Otherwise
+            // this is a native call into an uninitialized runtime every frame.
+            if (!Active) return;
+
             // Log every N frames to avoid flooding — adjust as needed
             bool log_this_frame = Time.frameCount % 60 == 0;
 

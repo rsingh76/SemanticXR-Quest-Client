@@ -177,11 +177,16 @@ namespace SemanticXR.Streaming
             };            Debug.LogWarning($"[Orchestrator] Frames transport = {transport}, max_depth_m = {maxDepthM:F2}, depth_disabled = {depthDisabled}");
             _tcp.Start();
 
+            // The response poller only makes sense once the ILLIXR runtime is
+            // up. gRPC voice responses return inline on the call, not via poll.
+            if (_poller != null) _poller.Active = transport == FramesTransport.Illixr;
+
             OnConnected?.Invoke();
         }
 
         public void Disconnect()
         {
+            if (_poller != null) _poller.Active = false;
             _encoder?.Stop(); _encoder?.Dispose(); _encoder = null;
             _tcp?.Stop(); _tcp?.Dispose(); _tcp = null;
             _encoderReady = false;

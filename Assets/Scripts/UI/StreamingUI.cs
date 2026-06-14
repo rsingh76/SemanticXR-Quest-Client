@@ -717,9 +717,15 @@ namespace SemanticXR.UI
             _bwRateMbps = 0f;
             // Tell the audio client which server to send to — same IP as the
             // frames stream, separate user-configurable port for the
-            // vis_proto VisualizerServer.
-            if (_audio != null && int.TryParse(_audioPortString, out int audioPort))
-                _audio.Configure(_ipAddress, audioPort);
+            // vis_proto VisualizerServer — and which transport to route over.
+            // Always configure transport, even in ILLIXR mode where the audio
+            // port is blank (ILLIXR ignores address/port and uses the native
+            // bridge), so the voice query doesn't fall back to gRPC.
+            if (_audio != null)
+            {
+                int.TryParse(_audioPortString, out int audioPort);
+                _audio.Configure(_ipAddress, audioPort, _orchestrator.Transport);
+            }
             InitStreamingPanelPose();
             if (_micOrb != null) { _micOrb.SetActive(true); InitMicOrbPose(); }
             _connectSettings?.Hide();
