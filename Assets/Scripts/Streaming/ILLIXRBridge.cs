@@ -66,20 +66,24 @@ public static class ILLIXRBridge
         float  minMatchSimilarity
     );
 
-    /// <summary>
-    /// Poll the switchboard for a query response.
-    /// Called from ILLIXRResponsePoller.Update().
-    /// </summary>
-    /// <returns>1 if a new response is available, 0 otherwise.</returns>
     [DllImport(LIB)]
-    public static extern int illixr_unity_get_query_response(
+    public static extern int illixr_unity_get_query_response_info(
         out ulong queryId,
-        float[]   centroids,
         out int   numClouds,
+        out int   totalPoints,
+        int[]     pointsPerCloud,
+        int       pointsPerCloudMax,
+        float[]   centroids,
         float[]   colors,
         int       colorsMax,
+        out int   numColors,
         out float serverLatency,
         byte[]    textQueryBuf,
-        int       textQueryBufLen
-    );
+        int       textQueryBufLen);
+
+    [DllImport(LIB)]
+    public static extern int illixr_unity_get_query_response_points(
+        ulong   queryId,
+        float[] points,
+        int     pointsMax);
 }

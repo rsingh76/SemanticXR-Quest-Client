@@ -21,10 +21,12 @@ namespace SemanticXR.UI
 
         // Max point clouds we allocate for per poll — resize if needed
         const int MaxPointClouds  = 64;
+        const int MaxTotalPoints  = 100000;
         const int TextQueryBufLen = 512;
 
+        readonly int[]   _pointsPerCloud = new int[MaxPointClouds];
         readonly float[] _centroids     = new float[MaxPointClouds * 3];
-        readonly float[] _colors     = new float[MaxPointClouds];
+        readonly float[] _colors         = new float[MaxPointClouds * 3];
         readonly byte[]  _textQueryBuf  = new byte[TextQueryBufLen];
 
         void Update()
@@ -39,36 +41,42 @@ namespace SemanticXR.UI
             if (log_this_frame)
                 Debug.Log($"[ILLIXRResponsePoller] Polling... frame={Time.frameCount}");
 
-            int result = ILLIXRBridge.illixr_unity_get_query_response(
+            int result = ILLIXRBridge.illixr_unity_get_query_response_info(
                 out ulong queryId,
-                _centroids,
-                out int numClouds,
-                _colors,
+                out int   numClouds,
+                out int   totalPoints,
+                _pointsPerCloud,
                 MaxPointClouds,
+                _centroids,
+                _colors,
+                MaxPointClouds * 3,
+                out int   numColors,
                 out float serverLatency,
                 _textQueryBuf,
                 TextQueryBufLen);
 
-            if (log_this_frame)
-                Debug.Log($"[ILLIXRResponsePoller] Poll result={result}");
-
             if (result == 0) return;
 
-            string textQuery = System.Text.Encoding.UTF8.GetString(_textQueryBuf).TrimEnd('\0');
-            Debug.Log($"[ILLIXRResponsePoller] Response received: " +
-                      $"queryId={queryId} " +
-                      $"numClouds={numClouds} " +
-                      $"serverLatency={serverLatency:F3} " +
-                      $"textQuery='{textQuery}' " +
-                      $"centroids=[{string.Join(", ", _centroids.Take(numClouds * 3).Select(f => f.ToString("F3")))}]");
+            // Allocate exact buffer and fetch points
+            float[] allPoints = new float[totalPoints * 3];
+            ILLIXRBridge.illixr_unity_get_query_response_points(
+                queryId, allPoints, totalPoints);
 
-            OnStatus?.Invoke($"Response: {numClouds} objects found. Query: '{textQuery}'");
+            string textQuery = System.Text.Encoding.UTF8
+                .GetString(_textQueryBuf).TrimEnd('\0');
+
+            Debug.Log($"[ILLIXRResponsePoller] Response: id={queryId} " +
+                      $"clouds={numClouds} totalPoints={totalPoints} " +
+                      $"text='{textQuery}'");
+
             OnResponse?.Invoke(new QueryResponseData
             {
                 QueryId       = queryId,
                 NumClouds     = numClouds,
                 Centroids     = _centroids,
                 Colors        = _colors,
+                PointsPerCloud = _pointsPerCloud,
+                AllPoints     = allPoints,
                 ServerLatency = serverLatency,
                 TextQuery     = textQuery,
             });
@@ -83,6 +91,8 @@ namespace SemanticXR.UI
         public int     NumClouds;
         public float[] Centroids;   // flat [x0,y0,z0, x1,y1,z1, ...]
         public float[] Colors;
+        public int[]   PointsPerCloud;
+        public float[] AllPoints;
         public float   ServerLatency;
         public string  TextQuery;
     }

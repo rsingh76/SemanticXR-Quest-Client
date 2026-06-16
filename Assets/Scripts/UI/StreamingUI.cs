@@ -796,38 +796,53 @@ namespace SemanticXR.UI
             var response = new XrVis.allPointClouds
             {
                 TextQuery             = data.TextQuery ?? "",
-                ServerQueryProcessing = data.ServerLatency * 1000f,  // seconds → ms
+                ServerQueryProcessing = data.ServerLatency * 1000f,
                 NumPointClouds        = data.NumClouds,
             };
+
+            int pointOffset  = 0;
+            int colorOffset  = 0;
 
             for (int i = 0; i < data.NumClouds; i++)
             {
                 var pc = new XrVis.PointCloud
                 {
-                    NumPoints = 1,
+                    NumPoints = data.PointsPerCloud[i],
                 };
 
+                // Centroid
                 if (data.Centroids != null && data.Centroids.Length >= (i + 1) * 3)
                 {
                     pc.Centroid.Add(data.Centroids[i * 3]);
                     pc.Centroid.Add(data.Centroids[i * 3 + 1]);
                     pc.Centroid.Add(data.Centroids[i * 3 + 2]);
-
-                    pc.Points.Add(data.Centroids[i * 3]);
-                    pc.Points.Add(data.Centroids[i * 3 + 1]);
-                    pc.Points.Add(data.Centroids[i * 3 + 2]);
                 }
+
+                // Full point cloud — flat XYZ triples
+                int floatCount = data.PointsPerCloud[i] * 3;
+                if (data.AllPoints != null &&
+                    pointOffset + floatCount <= data.AllPoints.Length)
+                {
+                    for (int j = 0; j < floatCount; j++)
+                        pc.Points.Add(data.AllPoints[pointOffset + j]);
+                }
+                pointOffset += floatCount;
+
+                // Colors — 3 floats per cloud
+                if (data.Colors != null &&
+                    colorOffset + 3 <= data.Colors.Length)
+                {
+                    response.Colors.Add(data.Colors[colorOffset]);
+                    response.Colors.Add(data.Colors[colorOffset + 1]);
+                    response.Colors.Add(data.Colors[colorOffset + 2]);
+                }
+                colorOffset += 3;
 
                 response.PointClouds.Add(pc);
             }
 
-            if (data.Colors != null)
-                foreach (var c in data.Colors)
-                    response.Colors.Add(c);
-
             OnPointCloudsReceived(response);
-        }
-        
+        }        
         void ClearPoints()
         {
             _visualizer?.Clear();
