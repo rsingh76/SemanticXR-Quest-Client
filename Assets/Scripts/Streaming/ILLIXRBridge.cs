@@ -86,4 +86,27 @@ public static class ILLIXRBridge
         ulong   queryId,
         float[] points,
         int     pointsMax);
+
+    /// <summary>
+    /// Acquire the latest environment depth frame from the OpenXR runtime.
+    /// MUST be called from Unity's main thread while a XR frame is open
+    /// (i.e. from MonoBehaviour.LateUpdate()).
+    /// The result is stored in the xr_sensor_capture plugin and consumed
+    /// by its threadloop via timestamp matching against RGB frames.
+    /// </summary>
+    [DllImport(LIB)]
+    public static extern void illixr_acquire_depth();
+
+    /// <summary>
+    /// Returns the native render event callback pointer for use with
+    /// GL.IssuePluginEvent. The callback initializes Vulkan readback
+    /// resources for the xr_sensor_capture depth pipeline on Unity's
+    /// render thread where the Vulkan device is current.
+    /// </summary>
+    [DllImport(LIB)]
+    public static extern System.IntPtr illixr_get_render_event_callback();
+    
+    [DllImport(LIB)]
+    public static extern void illixr_release_depth();
+
 }

@@ -51,8 +51,13 @@ namespace SemanticXR.Streaming
         FieldInfo _frameDescCreateTimeField; // DepthFrameDesc.createTime (may not exist on older SDKs)
         FieldInfo _camTimestampNsField;      // PassthroughCameraAccess._timestampNsMonotonic (private)
 
-        ILLIXRManager _illixr;
-        
+        ILLIXRManager        _illixr;
+        ILLIXRDepthAcquirer  _depthAcquirer;
+
+        // True when the ILLIXR transport is selected — Unity does no capture in this mode.
+        // All RGB, depth, and pose acquisition is handled by the xr_sensor_capture C++ plugin.
+        bool IsIllixr => transport == FramesTransport.Illixr;
+
         // NOTE: We considered using MRUKNativeFuncs.GetHeadsetPoseAtTime(long ns) which takes
         // nanoseconds directly with zero precision loss. However, Meta's own GetCameraPose()
         // never calls it — they only use it as a "native library loaded?" guard, then call
@@ -174,18 +179,23 @@ namespace SemanticXR.Streaming
                 FramesTransport.Grpc   => new GrpcFramesClient(address, port, fps, maxDepthM, depthDisabled),
                 FramesTransport.Illixr => new ILLIXRFramesClient(),
                 _                      => new TcpProtoClient(address, port, fps, maxDepthM, depthDisabled),
-            };            Debug.LogWarning($"[Orchestrator] Frames transport = {transport}, max_depth_m = {maxDepthM:F2}, depth_disabled = {depthDisabled}");
+            };
+            Debug.LogWarning($"[Orchestrator] Frames transport = {transport}, max_depth_m = {maxDepthM:F2}, depth_disabled = {depthDisabled}");
             _tcp.Start();
 
             // The response poller only makes sense once the ILLIXR runtime is
             // up. gRPC voice responses return inline on the call, not via poll.
             if (_poller != null) _poller.Active = transport == FramesTransport.Illixr;
 
+            if (_depthAcquirer != null)
+                _depthAcquirer.Active = (transport == FramesTransport.Illixr);
+
             OnConnected?.Invoke();
         }
 
         public void Disconnect()
         {
+            if (_depthAcquirer != null) _depthAcquirer.Active = false;
             if (_poller != null) _poller.Active = false;
             _encoder?.Stop(); _encoder?.Dispose(); _encoder = null;
             _tcp?.Stop(); _tcp?.Dispose(); _tcp = null;
@@ -196,47 +206,46 @@ namespace SemanticXR.Streaming
 
         void Start()
         {
+            if (IsIllixr)
+            {
+                // ILLIXR transport: C++ plugin handles all capture.
+                // Set up the ILLIXR manager and response poller; skip camera/depth entirely.
+                _illixr = gameObject.AddComponent<ILLIXRManager>();
+
+                var pollerObj = new GameObject("ILLIXRResponsePoller");
+                pollerObj.transform.SetParent(transform);
+                _poller = pollerObj.AddComponent<ILLIXRResponsePoller>();
+                _poller.OnResponse += HandleQueryResponse;
+                _poller.OnStatus += status => Debug.Log($"[ILLIXR] {status}");
+
+                var acquirerObj = new GameObject("ILLIXRDepthAcquirer");
+                acquirerObj.transform.SetParent(transform);
+                _depthAcquirer = acquirerObj.AddComponent<ILLIXRDepthAcquirer>();
+
+                Debug.Log("[StreamingOrchestrator] ILLIXR transport — Unity capture disabled");
+                return;
+            }
+
+            // gRPC / TCP transport: Unity owns capture, encoding, and transmission.
             _cam = FindAnyObjectByType<PassthroughCameraAccess>();
-            
+
             if (_cam == null)
             {
                 Debug.LogError("[Orchestrator] No PassthroughCameraAccess found!");
                 return;
             }
-    
+
             Debug.Log($"[Orchestrator] Camera found: {_cam.name} " +
                       $"IsPlaying={_cam.IsPlaying} " +
                       $"enabled={_cam.enabled} " +
                       $"activeInHierarchy={_cam.gameObject.activeInHierarchy}");
-              
-            // Log permission state
+
             Debug.Log($"[Orchestrator] Camera permission granted=" +
                       $"{OVRPermissionsRequester.IsPermissionGranted(OVRPermissionsRequester.Permission.PassthroughCameraAccess)}");
-              
-            // Start coroutine to monitor when IsPlaying becomes true
+
             StartCoroutine(WaitForCamera());
-            
-            _illixr = gameObject.AddComponent<ILLIXRManager>();
-            
-            if (_cam == null)
-                Debug.LogError("[Orchestrator] No PassthroughCameraAccess found!");
-
-            // Setup depth
             SetupDepth();
-
-            // Disable the CameraToWorld demo UI elements
             DisableDemoUI();
-            // Create ILLIXR manager on this GameObject
-            _illixr = gameObject.AddComponent<ILLIXRManager>();
-
-            // Create response poller on a persistent child object
-            var pollerObj = new GameObject("ILLIXRResponsePoller");
-            pollerObj.transform.SetParent(transform);
-            _poller = pollerObj.AddComponent<ILLIXRResponsePoller>();
-            _poller.OnResponse += HandleQueryResponse;
-            _poller.OnStatus += status => Debug.Log($"[ILLIXR] {status}");
-
-            Debug.Log("[StreamingOrchestrator] ILLIXR components created");
         }
 
         IEnumerator WaitForCamera()
@@ -251,13 +260,13 @@ namespace SemanticXR.Streaming
                               $"permission={OVRPermissionsRequester.IsPermissionGranted(OVRPermissionsRequester.Permission.PassthroughCameraAccess)}");
                 yield return null;
             }
-    
+
             if (_cam.IsPlaying)
                 Debug.Log($"[Orchestrator] Camera is now playing after {elapsed:F1}s");
             else
                 Debug.LogError($"[Orchestrator] Camera never started after {elapsed:F1}s");
         }
-        
+
         void HandleQueryResponse(QueryResponseData data)
         {
             Debug.Log($"[StreamingOrchestrator] Query response: " +
@@ -265,7 +274,7 @@ namespace SemanticXR.Streaming
                       $"text='{data.TextQuery}'");
             OnQueryResponse?.Invoke(data);
         }
-        
+
         void SetupDepth()
         {
             _depthManager = FindAnyObjectByType<EnvironmentDepthManager>();
@@ -434,9 +443,6 @@ namespace SemanticXR.Streaming
         }
 
         // Snapshot of RGB + pose + intrinsics + timestamps at the call instant.
-        // Lives in this DTO so both the depth-on path (which packs it alongside
-        // a depth readback) and the depth-off path (which uses it directly) can
-        // share the same capture code.
         struct RgbSnapshot
         {
             public byte[] Nv12;
@@ -448,9 +454,6 @@ namespace SemanticXR.Streaming
             public bool HasRgb;
         }
 
-        // Capture RGB + pose at this instant. Identical to the inline block that
-        // used to live at the top of TryReadbackDepth — extracted so the no-depth
-        // path can call it without spinning up any GPU readback.
         RgbSnapshot CaptureRgbSnapshot()
         {
             var s = new RgbSnapshot { CameraPose = Matrix4x4.identity };
@@ -532,9 +535,6 @@ namespace SemanticXR.Streaming
             return s;
         }
 
-        // Depth-off capture path: pack the RGB snapshot into _latestCapture
-        // synchronously (no GPU readback, no callback delay). Mirrors the
-        // CoCapturedFrame fields the depth-on path sets, but with HasDepth = false.
         void CaptureRgbOnly()
         {
             var s = CaptureRgbSnapshot();
@@ -560,10 +560,6 @@ namespace SemanticXR.Streaming
             var depthTex = Shader.GetGlobalTexture("_PreprocessedEnvironmentDepthTexture") as RenderTexture;
             if (depthTex == null || !depthTex.IsCreated()) return;
 
-            // ---- SNAPSHOT everything at REQUEST time ----
-            // The GPU readback captures the depth texture content at this moment.
-            // We ALSO capture RGB, pose, intrinsics NOW so they all match.
-
             var rgb = CaptureRgbSnapshot();
             byte[] rgbNv12 = rgb.Nv12;
             int rgbW = rgb.Width, rgbH = rgb.Height;
@@ -580,10 +576,8 @@ namespace SemanticXR.Streaming
             float nearZ = zbuf.x;
             float farZ = zbuf.y;
 
-            // Head pose at this instant (Camera.main eye center, Unity world)
             var headPose = Camera.main != null ? Camera.main.transform.localToWorldMatrix : Matrix4x4.identity;
 
-            // Depth FOV tangents, derived intrinsics, pose, createTime
             int texW = depthTex.width, texH = depthTex.height;
             bool hasDepthIntr = TryReadDepthFrameDesc(texW, texH,
                 out float tanL, out float tanR, out float tanT, out float tanD,
@@ -605,23 +599,17 @@ namespace SemanticXR.Streaming
                     var data = request.GetData<byte>();
 
                     // Strip to R channel + flip vertically in one pass.
-                    //
                     // Source: R16G16B16A16_SFloat (8 bytes/pixel), bottom-up (OpenGL order).
                     //   R = left-eye inverted NDC depth   <- the only channel we use
-                    //   G = right-eye                     <- unused (we're a left-camera capture)
-                    //   B, A = edge softness for soft occlusion  <- unused
-                    //
-                    // Dropping G/B/A cuts depth bandwidth by 4x (800KB -> 200KB per frame
-                    // at 320x320). We also flip to top-down here so server/consumers can
-                    // use cy = tanT * fy directly.
-                    //
+                    //   G = right-eye                     <- unused
+                    //   B, A = edge softness              <- unused
                     // Output: R16_SFloat, 2 bytes/pixel, top-down.
                     int w = request.width, h = request.height;
                     byte[] depthR = new byte[w * h * 2];
                     for (int r = 0; r < h; r++)
                     {
-                        int srcBase = (h - 1 - r) * w * 8; // bottom-up source row
-                        int dstBase = r * w * 2;           // top-down target row
+                        int srcBase = (h - 1 - r) * w * 8;
+                        int dstBase = r * w * 2;
                         for (int c = 0; c < w; c++)
                         {
                             depthR[dstBase + c * 2]     = data[srcBase + c * 8];
@@ -629,9 +617,6 @@ namespace SemanticXR.Streaming
                         }
                     }
 
-                    // Co-captured frame: depth + RGB + poses + timestamps from request time.
-                    // Gating: we accept the frame if depth is present. RGB is optional —
-                    // a frame may be depth-only if RGB readback failed transiently.
                     _latestCapture = new CoCapturedFrame
                     {
                         DepthBytes = depthR,
@@ -666,53 +651,23 @@ namespace SemanticXR.Streaming
         }
 
         // ---- Pose lookup that matches the image timestamp exactly ----
-        //
-        // Architecture: PassthroughCameraAccess.Update() calls a single native function
-        // (CameraGetLatestImage) that returns BOTH the GPU texture AND the nanosecond
-        // timestamp (_timestampNsMonotonic) atomically. GetColors() just reads that
-        // already-captured texture back to CPU. So the image and timestamp ARE paired.
-        //
-        // The pose is then queried at that exact timestamp from the tracking system.
-        // This is the ONLY way Meta's API works — there is no single call that returns
-        // image + pose together. The timestamp IS the synchronization mechanism.
-        //
-        // We call ovrp_GetNodePoseStateAtTime(double) — the same native function that
-        // Meta's GetCameraPose() uses internally, but with DOUBLE precision instead of
-        // FLOAT. This gives sub-microsecond timestamp precision vs Meta's ~6ms float loss.
-        //
-        // Convention: returns head pose in Unity LEFT-HANDED WORLD SPACE (same as
-        // Camera.main.transform). We then apply the camera-specific LensOffset to get
-        // the physical RGB camera pose.
-
         [DllImport("OVRPlugin", CallingConvention = CallingConvention.Cdecl)]
         static extern OVRPlugin.Result ovrp_GetNodePoseStateAtTime(
             double time, OVRPlugin.Node nodeId, out OVRPlugin.PoseStatef nodePoseState);
 
-        /// <summary>
-        /// Get the RGB camera pose at the exact image capture time.
-        /// Uses ovrp_GetNodePoseStateAtTime(double) — same function as Meta's GetCameraPose()
-        /// but with double precision. Returns pose in Unity LH world space.
-        /// Applies the physical LensOffset for the active camera (left or right).
-        /// </summary>
         bool TryGetPoseAtImageTimestamp(long timestampNsMonotonic, out Pose cameraPose)
         {
             cameraPose = default;
             if (timestampNsMonotonic <= 0) return false;
 
-            // Convert ns → seconds with DOUBLE precision (not float!)
-            // Meta's GetCameraPose() does _timestampNsMonotonic * 1e-9f (float) → ~6ms loss
-            // We do timestampNsMonotonic * 1e-9 (double) → sub-microsecond precision
             double timeSec = timestampNsMonotonic * 1e-9;
 
             if (!ovrp_GetNodePoseStateAtTime(timeSec, OVRPlugin.Node.Head,
                     out OVRPlugin.PoseStatef poseState).IsSuccess())
                 return false;
 
-            // OVRPlugin returns in Unity LH world space (SDK handles RH→LH internally)
             var headPose = poseState.Pose.ToOVRPose();
 
-            // Apply physical lens offset for THIS camera (left or right)
-            // Same logic as Meta's PassthroughCameraAccess.GetCameraPose() line 571-573
             if (_cam != null)
             {
                 var lensOffset = _cam.Intrinsics.LensOffset;
@@ -769,44 +724,33 @@ namespace SemanticXR.Streaming
             }
         }
 
-        /// <summary>
-        /// One-time startup validation after camera warmup (~1 second).
-        /// Checks that all required subsystems are functional. Sets _validationError
-        /// on hard failure (streaming will refuse to send frames).
-        /// </summary>
         void TryStartupValidation()
         {
             if (_startupValidated) return;
             if (_cam == null || !_cam.IsPlaying) return;
 
-            // Wait a bit for the camera to warm up (at least 30 frames or 1 second)
             if (Time.frameCount < 30 && Time.realtimeSinceStartup < 2f) return;
             _startupValidated = true;
 
             var errors = new System.Collections.Generic.List<string>();
 
-            // 1. Camera resolution
             var res = _cam.CurrentResolution;
             if (res.x <= 0 || res.y <= 0)
                 errors.Add($"Camera resolution invalid: {res.x}x{res.y}");
 
-            // 2. RGB intrinsics
             var intr = _cam.Intrinsics;
             if (intr.FocalLength.x <= 0 || intr.FocalLength.y <= 0)
                 errors.Add($"Intrinsics focal length invalid: fx={intr.FocalLength.x:F1} fy={intr.FocalLength.y:F1}");
             else if (res.x > 0 && res.y > 0)
             {
-                // Principal point must be inside image
                 if (intr.PrincipalPoint.x < 0 || intr.PrincipalPoint.x >= res.x ||
                     intr.PrincipalPoint.y < 0 || intr.PrincipalPoint.y >= res.y)
                     errors.Add($"Intrinsics principal point outside image: cx={intr.PrincipalPoint.x:F1} cy={intr.PrincipalPoint.y:F1} in {res.x}x{res.y}");
             }
 
-            // 3. Timestamp reflection
             if (_camTimestampNsField == null)
                 errors.Add("_timestampNsMonotonic reflection failed -- cannot sync pose to image");
 
-            // 4. Pose lookup availability (OVRPlugin P/Invoke with double precision)
             try
             {
                 ovrp_GetNodePoseStateAtTime(0.0, OVRPlugin.Node.Head, out _);
@@ -817,7 +761,6 @@ namespace SemanticXR.Streaming
                 errors.Add("ovrp_GetNodePoseStateAtTime P/Invoke failed -- pose lookup unavailable");
             }
 
-            // 5. Try a real pose lookup with the current timestamp
             if (_camTimestampNsField != null && errors.Count == 0)
             {
                 try
@@ -855,16 +798,7 @@ namespace SemanticXR.Streaming
 
         void Update()
         {
-            if (Time.frameCount % 60 == 0)
-                Debug.Log($"[Update] _tcp={_tcp != null} _cam={_cam != null} " +
-                          $"playing={_cam?.IsPlaying} transport={Transport} " +
-                          $"captureInterval={_captureInterval} " +
-                          $"timeSinceCapture={Time.time - _lastCaptureTime:F2}");
-            
-            if (_tcp == null || _cam == null || !_cam.IsPlaying) return;
-
-            // Run one-time validation after camera warmup
-            TryStartupValidation();
+            if (_tcp == null) return;
 
             var err = _tcp.LastError;
             if (!string.IsNullOrEmpty(err))
@@ -874,11 +808,26 @@ namespace SemanticXR.Streaming
                 return;
             }
 
+            // ILLIXR transport: capture is handled entirely by the xr_sensor_capture
+            // C++ plugin. Unity has nothing to do here.
+            if (IsIllixr) return;
+
+            if (_cam == null || !_cam.IsPlaying) return;
+
+            // Run one-time validation after camera warmup
+            TryStartupValidation();
+
             // Hard validation failure — still run Update for UI/disconnect but don't capture
             if (_validationError != null) return;
 
             if (Time.time - _lastCaptureTime < _captureInterval) return;
             _lastCaptureTime = Time.time;
+
+            if (Time.frameCount % 60 == 0)
+                Debug.Log($"[Update] _cam={_cam != null} " +
+                          $"playing={_cam?.IsPlaying} transport={Transport} " +
+                          $"captureInterval={_captureInterval} " +
+                          $"timeSinceCapture={Time.time - _lastCaptureTime:F2}");
 
             // Track wall-clock between consecutive captures (true client FPS).
             double nowReal = Time.realtimeSinceStartupAsDouble;
@@ -911,9 +860,6 @@ namespace SemanticXR.Streaming
 
             if (Time.time - _lastLogTime > 5f)
             {
-                // Per-stage rates over the log window — pinpoints which stage caps
-                // throughput. cap > enc means the encoder is the bottleneck;
-                // enc > sent means the transport (queue eviction) is.
                 float dt = Time.time - _lastLogTime;
                 int dCap  = _capturedCount    - _lastLogCapturedCount;
                 int dEnc  = _encoderOutCount  - _lastLogEncoderOutCount;
@@ -935,23 +881,16 @@ namespace SemanticXR.Streaming
 
         void CaptureFrame()
         {
-            // Hard validation failure — don't attempt anything
             if (_validationError != null) return;
 
             var c = _latestCapture;
 
-            // --- Strict gating: every field needed for RGB-D reconstruction must be present ---
-            // Depth gate is skipped in depth-disabled sessions — the RGB-only
-            // capture path never sets HasDepth.
-
             if (!_depthDisabledSession && !c.HasDepth) { _droppedNoDepth++; return; }
             if (!c.HasRgb)    { _droppedNoRgb++; return; }
 
-            // Pose MUST come from the image timestamp path (not Camera.main)
             if (!c.HasRgbCameraPose)  { _droppedNoPose++; return; }
             if (c.RgbTimestampNs <= 0) { _droppedNoTimestamp++; return; }
 
-            // Intrinsics sanity: fx/fy positive, principal point inside image
             int w = c.RgbWidth, h = c.RgbHeight;
             if (w <= 0 || h <= 0) { _droppedBadIntrinsics++; return; }
             if (c.RgbFx <= 0 || c.RgbFy <= 0 ||
@@ -1026,9 +965,6 @@ namespace SemanticXR.Streaming
             int uvSize = (w / 2) * (h / 2) * 2;
             byte[] nv12 = new byte[ySize + uvSize];
 
-            // Vertical flip: GetColors() returns bottom-up on this stack
-            // (decoded JPEGs otherwise come out upside-down). Read source row
-            // (h-1-row) when writing destination row.
             for (int row = 0; row < h; row++)
             {
                 int srcRow = h - 1 - row;
@@ -1066,17 +1002,56 @@ namespace SemanticXR.Streaming
         {
             Debug.Log("[StreamingOrchestrator] Starting ILLIXR init...");
 
+            // Create ILLIXR components on the main thread before handing off to
+            // Task.Run. AddComponent and GameObject construction are not thread-safe
+            // and must happen here. The null check handles the case where Start()
+            // already created them (transport was set to ILLIXR at scene load).
+            if (_illixr == null)
+            {
+                _illixr = gameObject.AddComponent<ILLIXRManager>();
+
+                var pollerObj = new GameObject("ILLIXRResponsePoller");
+                pollerObj.transform.SetParent(transform);
+                _poller = pollerObj.AddComponent<ILLIXRResponsePoller>();
+                _poller.OnResponse += HandleQueryResponse;
+                _poller.OnStatus += status => Debug.Log($"[ILLIXR] {status}");
+
+                var acquirerObj = new GameObject("ILLIXRDepthAcquirer");
+                acquirerObj.transform.SetParent(transform);
+                _depthAcquirer = acquirerObj.AddComponent<ILLIXRDepthAcquirer>();
+
+                Debug.Log("[StreamingOrchestrator] ILLIXR components created");
+            }
+
+            // Set XrInstance and XrSession env vars BEFORE calling _illixr.Initialize(),
+            // which internally calls illixr_unity_init() and constructs plugins that
+            // read these env vars at construction time. Both handles are available here
+            // because ILLIXRXrHandleProvider fires during XR initialization, which
+            // completes long before the user can press Connect.
+            if (ILLIXRXrHandleProvider.HasHandles)
+            {
+                ILLIXRBridge.illixr_unity_set_env("ILLIXR_XR_INSTANCE",
+                    ILLIXRXrHandleProvider.XrInstance.ToString());
+                ILLIXRBridge.illixr_unity_set_env("ILLIXR_XR_SESSION",
+                    ILLIXRXrHandleProvider.XrSession.ToString());
+                Debug.Log($"[ILLIXR] Set XrInstance=0x{ILLIXRXrHandleProvider.XrInstance:X} " +
+                          $"XrSession=0x{ILLIXRXrHandleProvider.XrSession:X}");
+            }
+            else
+            {
+                Debug.LogError("[ILLIXR] XrInstance/XrSession not available — " +
+                               "ILLIXRXrHandleProvider may not be enabled in OpenXR features.");
+            }
+
             bool done    = false;
             bool success = false;
             string clientIp = GetLocalIP();
 
-            // Run blocking ILLIXR init off the main thread so PassthroughCameraAccess
-            // can continue its normal update loop during initialization
             System.Threading.Tasks.Task.Run(() =>
             {
                 try
                 {
-                    _illixr.Initialize(serverIp, serverPort, clientIp, clientPort);
+                    _illixr.Initialize(serverIp, serverPort, clientIp, clientPort, fps);
                     success = _illixr.IsInitialized;
                 }
                 catch (System.Exception e)
@@ -1089,7 +1064,6 @@ namespace SemanticXR.Streaming
                 }
             });
 
-            // Yield each frame — main thread stays free, camera keeps running
             float timeout = 10f;
             float elapsed = 0f;
             while (!done)
@@ -1111,7 +1085,8 @@ namespace SemanticXR.Streaming
 
             Debug.Log("[StreamingOrchestrator] ILLIXR init complete, connecting...");
             Connect(serverIp, serverPort, fps, maxDepthM, depthDisabled);
-        }        
+        }
+
         static string GetLocalIP()
         {
             using var s = new System.Net.Sockets.Socket(
@@ -1120,6 +1095,7 @@ namespace SemanticXR.Streaming
             s.Connect("8.8.8.8", 65530);
             return (s.LocalEndPoint as System.Net.IPEndPoint)?.Address.ToString() ?? "127.0.0.1";
         }
+
         void OnDestroy() => Disconnect();
     }
 }

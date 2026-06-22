@@ -1,5 +1,27 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
+--- !u!114 &-9142086064489152385
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1a3fd48206644f9ca7a67742efd758c8, type: 3}
+  m_Name: ILLIXRXrHandleProvider Android
+  m_EditorClassIdentifier: Assembly-CSharp::SemanticXR.ILLIXRXrHandleProvider
+  m_enabled: 1
+  nameUi: ILLIXR XR Handle Provider
+  version: 1.0.0
+  featureIdInternal: com.illixr.xrhandleprovider
+  openxrExtensionStrings: 
+  company: ILLIXR
+  priority: 0
+  targetOpenXRApiVersion: 
+  required: 0
+  customRuntimeLoaderName: 
 --- !u!114 &-8705443546400708464
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1305,6 +1327,7 @@ MonoBehaviour:
   - {fileID: -6703759578548275811}
   - {fileID: -4278924443639165325}
   - {fileID: 8166212654392320859}
+  - {fileID: -9142086064489152385}
   - {fileID: 2712899343883620681}
   - {fileID: -4793266000934642512}
   - {fileID: 7843296455928633143}
