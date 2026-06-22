@@ -28,7 +28,8 @@ namespace SemanticXR
         /// <param name="clientIp">ILLIXR_TCP_CLIENT_IP — headset's own IP for the return channel.</param>
         /// <param name="clientPort">ILLIXR_TCP_CLIENT_PORT — port on the headset for responses.</param>
         public void Initialize(string serverIp, int serverPort,
-                               string clientIp, int clientPort)
+                               string clientIp, int clientPort,
+                               int captureFps)
         {
             if (IsInitialized)
             {
@@ -42,7 +43,8 @@ namespace SemanticXR
             SetEnv("ILLIXR_TCP_SERVER_PORT",  serverPort.ToString());
             SetEnv("ILLIXR_TCP_CLIENT_IP",   clientIp);
             SetEnv("ILLIXR_TCP_CLIENT_PORT",  clientPort.ToString());
-
+            SetEnv("ILLIXR_CAPTURE_FPS",     captureFps.ToString());
+            
             int result = ILLIXRBridge.illixr_unity_init();
             if (result != 0)
             {
