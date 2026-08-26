@@ -434,10 +434,12 @@ namespace SemanticXR.UI
                 _streamingPanel.transform,
                 translucence: 0.18f,
                 similarity:   0.95f,
-                minMatch:     0.25f);
+                minMatch:     0.25f,
+                glow:         false);
             _settings.OnTranslucenceChanged += a => _visualizer?.SetPointAlpha(a);
             _settings.OnSimilarityChanged   += s => _audio?.SetThresholds(s, _audio.MinMatchSimilarity);
             _settings.OnMinMatchChanged     += m => _audio?.SetThresholds(_audio.SimilarityThreshold, m);
+            _settings.OnGlowChanged         += on => _visualizer?.SetGlow(on);
 
             // Gear button: top-right of the streaming panel. Tap toggles the
             // settings sub-panel below. Uses an IconFactory.Gear sprite as a

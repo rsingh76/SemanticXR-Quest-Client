@@ -43,6 +43,20 @@ namespace SemanticXR.UI
                  "for the same alpha value.")]
         [SerializeField] bool doubleSided = true;
 
+        [Tooltip("When ON, points pulse brighter/dimmer to grab attention (reads as a glow " +
+                 "under Additive blend). Cheap on Quest: modulates each cluster's SHARED " +
+                 "material once per frame — O(clusters), not O(points). No post-processing, " +
+                 "no new shaders. Toggle via SetGlow().")]
+        [SerializeField] bool glow = false;
+
+        [Tooltip("Glow pulses per second.")]
+        [SerializeField, Range(0.1f, 3f)] float glowHz = 1.2f;
+
+        [Tooltip("Peak brightness multiplier at the top of the pulse (1 = no boost). Values " +
+                 ">1 push the colour into HDR, which under Additive blend brightens the point " +
+                 "against the passthrough.")]
+        [SerializeField, Range(1f, 4f)] float glowPeak = 2.2f;
+
         // Fires the first time AddResponse renders ≥1 cluster after every
         // session start (session = creation OR most-recent Clear). Used by the
         // tutorial coach marks to show the color-confidence popup once.
@@ -52,6 +66,14 @@ namespace SemanticXR.UI
         // One batch per query response, so Clear() can wipe everything in one
         // sweep and the accumulate behaviour is obvious.
         readonly List<List<GameObject>> _batches = new();
+
+        // One entry per distinct cluster material, holding its baked RGB (alpha
+        // stripped) so the glow pulse can modulate brightness relative to the
+        // server colour. Rebuilt whenever materials change (AddResponse /
+        // SetPointAlpha); wiped by Clear(). This is what keeps the pulse
+        // O(clusters) rather than O(points) — one SetColor per cluster per frame.
+        struct PulseMat { public Material mat; public Color rgb; }
+        readonly List<PulseMat> _pulseMats = new();
 
         // One world-space centroid per rendered cluster, in the order
         // AddResponse added them. Consumed by OffscreenPointCloudArrow.
@@ -130,6 +152,7 @@ namespace SemanticXR.UI
             }
 
             _batches.Add(batch);
+            RebuildPulseMats();
             Debug.Log($"[PointCloudVisualizer] Added {objectCount} clusters, {pointTotal} points; total now {TotalPointCount}");
             if (!_firedFirstCluster && batch.Count > 0)
             {
@@ -175,6 +198,7 @@ namespace SemanticXR.UI
                 }
 
             foreach (var oldMat in oldToNew.Keys) Destroy(oldMat);
+            RebuildPulseMats();   // materials were swapped out from under the pulse
             Debug.Log($"[PointCloudVisualizer] SetPointAlpha({pointAlpha:F2}) — rebuilt {oldToNew.Count} materials across {_batches.Count} batches");
         }
 
@@ -203,11 +227,75 @@ namespace SemanticXR.UI
                         Destroy(go);
                     }
             _batches.Clear();
+            _pulseMats.Clear();
             _centroids.Clear();
             _firedFirstCluster = false;
         }
 
         void OnDestroy() => Clear();
+
+        // ---------- glow pulse ----------
+
+        // Turn the attention pulse on/off. When turning off, restore every
+        // cluster to its steady server colour so it doesn't freeze mid-pulse.
+        public void SetGlow(bool on)
+        {
+            glow = on;
+            if (!on)
+                foreach (var pm in _pulseMats)
+                {
+                    if (pm.mat == null) continue;
+                    var c = pm.rgb; c.a = pointAlpha;
+                    ApplyColor(pm.mat, c);
+                }
+            Debug.Log($"[PointCloudVisualizer] SetGlow({on}) — {_pulseMats.Count} cluster materials");
+        }
+
+        // Modulate every cluster's shared material once per frame. Cost is
+        // O(cluster materials), independent of point count. Only runs while glow
+        // is on and there's something to pulse.
+        void Update()
+        {
+            if (!glow || _pulseMats.Count == 0) return;
+
+            // Cosine ease in [0,1] → brightness in [1, glowPeak]. HDR (>1) shows
+            // up as a real glow under Additive blend; harmless under Alpha.
+            float t   = 0.5f - 0.5f * Mathf.Cos(Time.time * glowHz * 2f * Mathf.PI);
+            float mul = Mathf.Lerp(1f, glowPeak, t);
+
+            foreach (var pm in _pulseMats)
+            {
+                if (pm.mat == null) continue;
+                var c = pm.rgb * mul; c.a = pointAlpha;
+                ApplyColor(pm.mat, c);
+            }
+        }
+
+        // Collect the distinct cluster materials + their baked RGB so the pulse
+        // has a stable base colour to scale from. Called after any material churn.
+        void RebuildPulseMats()
+        {
+            _pulseMats.Clear();
+            var seen = new HashSet<Material>();
+            foreach (var batch in _batches)
+                foreach (var go in batch)
+                {
+                    if (go == null) continue;
+                    var m = go.GetComponent<Renderer>()?.sharedMaterial;
+                    if (m == null || !seen.Add(m)) continue;
+                    _pulseMats.Add(new PulseMat { mat = m, rgb = ExtractRgb(m) });
+                }
+        }
+
+        // Write a colour into whichever slot(s) the resolved shader reads — same
+        // set MakeTranslucentMaterial paints, so the pulse survives any of the
+        // candidate shaders (URP _BaseColor, legacy particles _TintColor, _Color).
+        static void ApplyColor(Material m, Color c)
+        {
+            m.color = c;                                                  // legacy _Color
+            if (m.HasProperty("_BaseColor")) m.SetColor("_BaseColor", c); // URP
+            if (m.HasProperty("_TintColor")) m.SetColor("_TintColor", c); // legacy particles
+        }
 
         GameObject CreateSphere(Vector3 pos, Material sharedMat)
         {

@@ -23,6 +23,7 @@ namespace SemanticXR.UI
         public event Action<float> OnTranslucenceChanged;
         public event Action<float> OnSimilarityChanged;
         public event Action<float> OnMinMatchChanged;
+        public event Action<bool>  OnGlowChanged;
 
         const float TrackWidthPx  = 240f;
         const float TrackHeightPx = 24f;     // hit area (was 12 — too thin to aim at)
@@ -30,31 +31,88 @@ namespace SemanticXR.UI
         GameObject _root;
         SliderRow _translucence, _similarity, _minMatch;
 
-        public void Build(Transform parent, float translucence, float similarity, float minMatch)
+        // Glow is a boolean, not a slider — rendered as an On/Off button pair
+        // (the codebase has no Toggle component; ConnectSettingsPanel's depth
+        // toggle uses the same two-button + highlight pattern).
+        Button _glowOnBtn, _glowOffBtn;
+        bool   _glow;
+
+        public void Build(Transform parent, float translucence, float similarity, float minMatch,
+                          bool glow = false)
         {
             _root = Mk.Panel(parent, "Settings", new Color(0.07f, 0.07f, 0.11f, 0.95f));
             var r = _root.GetComponent<RectTransform>();
-            // 520 x 240. Anchored at y=-210 so the rect's TOP edge lands at
-            // panel y=-90, comfortably below the dictation box (bottom at -50).
-            r.anchoredPosition = new Vector2(0, -210);
-            r.sizeDelta = new Vector2(520, 240);
+            // 520 x 320. Anchored at y=-250 so the rect's TOP edge still lands at
+            // panel y=-90 (-250 + 320/2), comfortably below the dictation box
+            // (bottom at -50). Height grew from 240 to fit the 4th (Glow) row.
+            r.anchoredPosition = new Vector2(0, -250);
+            r.sizeDelta = new Vector2(520, 320);
 
             _translucence = BuildRow(
-                y: 80, label: "Translucence",
+                y: 120, label: "Translucence",
                 min: 0.01f, max: 1.00f, step: 0.05f, initial: translucence,
                 onChanged: v => OnTranslucenceChanged?.Invoke(v));
 
             _similarity = BuildRow(
-                y: 0, label: "Similarity",
+                y: 40, label: "Similarity",
                 min: 0.85f, max: 0.99f, step: 0.01f, initial: similarity,
                 onChanged: v => OnSimilarityChanged?.Invoke(v));
 
             _minMatch = BuildRow(
-                y: -80, label: "Min match",
+                y: -40, label: "Min match",
                 min: 0.14f, max: 0.30f, step: 0.01f, initial: minMatch,
                 onChanged: v => OnMinMatchChanged?.Invoke(v));
 
+            BuildGlowRow(y: -120, initial: glow);
+
             _root.SetActive(false);
+        }
+
+        // Glow toggle row: label + On/Off button pair. No track / no ± buttons
+        // (it's boolean) and no Tick() involvement — button taps route through
+        // Button.onClick, unlike the sliders' manual ray-drag polling.
+        void BuildGlowRow(float y, bool initial)
+        {
+            Mk.Label(_root.transform, "Glow  (attention pulse)", new Vector2(-130, y), 13,
+                     new Color(0.8f, 0.85f, 0.95f), TextAlignmentOptions.MidlineLeft, 240);
+
+            var inactive = new Color(0.3f, 0.3f, 0.4f);
+            _glowOnBtn  = Mk.Btn(_root.transform, "On",  new Vector2(60,  y), new Vector2(70, 30),
+                                 inactive, 14, () => SetGlow(true));
+            _glowOffBtn = Mk.Btn(_root.transform, "Off", new Vector2(140, y), new Vector2(70, 30),
+                                 inactive, 14, () => SetGlow(false));
+
+            _glow = initial;
+            UpdateGlowVisuals();
+        }
+
+        // Flip glow state, repaint the active button, and fire the event only on
+        // an actual change (mirrors ConnectSettingsPanel.SetDepthEnabled).
+        void SetGlow(bool on)
+        {
+            if (_glow == on) return;
+            _glow = on;
+            UpdateGlowVisuals();
+            OnGlowChanged?.Invoke(on);
+            Debug.Log($"[SettingsPanel] glow → {on}");
+        }
+
+        void UpdateGlowVisuals()
+        {
+            var active   = new Color(0.55f, 0.45f, 0.15f);
+            var inactive = new Color(0.3f, 0.3f, 0.4f);
+            SetButtonBg(_glowOnBtn,   _glow ? active : inactive);
+            SetButtonBg(_glowOffBtn, !_glow ? active : inactive);
+        }
+
+        static void SetButtonBg(Button b, Color c)
+        {
+            if (b == null) return;
+            if (b.targetGraphic is Image img) img.color = c;
+            var cols = b.colors;
+            cols.highlightedColor = c * 1.3f;
+            cols.pressedColor     = c * 0.7f;
+            b.colors = cols;
         }
 
         public void Show() { if (_root != null) _root.SetActive(true); }
