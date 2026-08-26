@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.UI;
+using TMPro;
 
 namespace SemanticXR.UI
 {
@@ -25,6 +26,7 @@ namespace SemanticXR.UI
         Camera _cam;
         GameObject _canvasGo;
         RectTransform _arrowRect;
+        TextMeshProUGUI _label;
 
         public void Bind(PointCloudVisualizer viz) => _viz = viz;
 
@@ -53,6 +55,12 @@ namespace SemanticXR.UI
             img.sprite        = IconFactory.Arrow;       // right-pointing by default
             img.color         = arrowColor;
             img.raycastTarget = false;
+
+            // Direction hint. Sibling of the arrow (parented to the canvas, NOT
+            // the arrow) so it stays upright while the arrow rotates to point at
+            // the target. Text + position are set each frame in LateUpdate.
+            _label = Mk.Label(_canvasGo.transform, "", Vector2.zero, 30f, arrowColor,
+                TextAlignmentOptions.Center, 320f);
 
             _canvasGo.SetActive(false);
         }
@@ -103,6 +111,17 @@ namespace SemanticXR.UI
             // about Z sends the tip to (cos a, sin a) = dir.
             float aDeg = Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg;
             _arrowRect.localRotation = Quaternion.Euler(0f, 0f, aDeg);
+
+            // Adaptive hint: "Turn around" when the target is behind the camera
+            // (local.z < 0 — the case the arrow alone can't disambiguate),
+            // otherwise the dominant on-screen direction. Kept upright (no
+            // rotation) and nudged inboard of the arrow so it stays on-canvas.
+            string hint;
+            if (local.z < 0f)                              hint = "Turn around";
+            else if (Mathf.Abs(dir.x) >= Mathf.Abs(dir.y)) hint = dir.x >= 0f ? "Look right" : "Look left";
+            else                                           hint = dir.y >= 0f ? "Look up"    : "Look down";
+            _label.text = hint;
+            _label.rectTransform.anchoredPosition = dir * (arrowRadiusPx - 110f);
         }
 
         void SetVisible(bool v)

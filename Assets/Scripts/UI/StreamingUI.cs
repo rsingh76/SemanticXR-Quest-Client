@@ -343,6 +343,9 @@ namespace SemanticXR.UI
             Mk.Stretch(_connectPanel, 30);
 
             Mk.Label(_connectPanel.transform, "SemanticXR", new Vector2(0, 160), 32, Color.white);
+            // Sets expectations before the user acts: the map starts empty and
+            // is built live — nothing pre-existing to "connect" to.
+            Mk.Label(_connectPanel.transform, "Look around to map, ask queries", new Vector2(0, 137), 14, new Color(0.55f, 0.55f, 0.6f));
 
             Mk.Label(_connectPanel.transform, "System IP", new Vector2(0, 115), 16, new Color(0.6f, 0.6f, 0.65f));
             var ipNames = new string[IpPresets.Length];
@@ -377,7 +380,7 @@ namespace SemanticXR.UI
                 i => { _fpsIndex = i; _selectedFps = FpsOptions[i]; },
                 openUpward: true, itemHeight: 22f, itemFontSize: 15f, arrowRightMargin: 18f);
 
-            _connectBtn = Mk.Btn(_connectPanel.transform, "Connect", new Vector2(0, -90), new Vector2(220, 50), new Color(0.15f, 0.55f, 0.25f), 24, OnConnect);
+            _connectBtn = Mk.Btn(_connectPanel.transform, "Start Mapping", new Vector2(0, -90), new Vector2(260, 50), new Color(0.15f, 0.55f, 0.25f), 24, OnConnect);
             _errorText = Mk.Label(_connectPanel.transform, "", new Vector2(0, -140), 15, new Color(1f, 0.4f, 0.4f));
 
             // Skip-tutorial toggle, bottom-right of the Connect panel. Defaults
@@ -572,7 +575,7 @@ namespace SemanticXR.UI
             if (string.IsNullOrEmpty(_ipAddress)) { ShowError("Enter IP"); return; }
             if (!int.TryParse(_portString, out int port) || port < 1 || port > 65535) { ShowError("Invalid port"); return; }
             _connectBtn.interactable = false;
-            _errorText.text = "Connecting...";
+            _errorText.text = "Initializing mapping...";
             float maxDepthM = _connectSettings != null ? _connectSettings.WireValue : 0f;
             bool depthDisabled = _connectSettings != null && !_connectSettings.DepthEnabled;
             _orchestrator.Connect(_ipAddress, port, _selectedFps, maxDepthM, depthDisabled);
