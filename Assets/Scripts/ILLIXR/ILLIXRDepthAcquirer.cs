@@ -72,10 +72,11 @@ namespace SemanticXR
             if (!Active)
                 return;
 
-// 1. Acquire depth image on main thread (required by OpenXR).
+            // 1. Acquire depth image on main thread (required by OpenXR).
             //    This calls acquire_depth_unity_thread() which calls
             //    xrAcquireEnvironmentDepthImageMETA and stores the pending readback.
-            ILLIXRBridge.illixr_acquire_depth();
+            long displayTimeNs = ILLIXRXrHandleProvider.GetPredictedDisplayTimeNs();
+            ILLIXRBridge.illixr_acquire_depth(displayTimeNs);
 
             // 2. Submit the Vulkan copy on the render thread via GL.IssuePluginEvent.
             //    This call blocks until the render thread finishes submit_depth_readback(),

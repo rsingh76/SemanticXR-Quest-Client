@@ -39,6 +39,8 @@ namespace SemanticXR
         /// <summary>True once both handles have been populated.</summary>
         public static bool HasHandles => XrInstance != 0 && XrSession != 0;
 
+        public static long PredictedDisplayTimeNs { get; private set; }
+        
         protected override bool OnInstanceCreate(ulong xrInstance)
         {
             XrInstance = xrInstance;
@@ -60,6 +62,16 @@ namespace SemanticXR
         protected override void OnSessionDestroy(ulong xrSession)
         {
             XrSession = 0;
+        }
+        
+        // Get the current predicted display time from OVRPlugin.
+// This is the same XrTime Unity uses internally for the current frame.
+        public static long GetPredictedDisplayTimeNs()
+        {
+            // OVRPlugin.GetTimeInSeconds() returns the predicted display time
+            // for the current frame in seconds.
+            double timeSec = OVRPlugin.GetTimeInSeconds();
+            return (long)(timeSec * 1e9);
         }
     }
 }
