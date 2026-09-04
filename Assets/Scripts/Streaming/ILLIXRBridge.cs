@@ -95,7 +95,9 @@ public static class ILLIXRBridge
     /// by its threadloop via timestamp matching against RGB frames.
     /// </summary>
     [DllImport(LIB)]
-    public static extern void illixr_acquire_depth(long predictedDisplayTimeNs);
+    public static extern void illixr_acquire_depth(long predictedDisplayTimeNs,
+        float lensOffsetX, float lensOffsetY, float lensOffsetZ,
+        float lensRotX, float lensRotY, float lensRotZ, float lensRotW);
 
     /// <summary>
     /// Returns the native render event callback pointer for use with

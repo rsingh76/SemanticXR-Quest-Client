@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Runtime.InteropServices;
+using Meta.XR;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -72,11 +73,23 @@ namespace SemanticXR
             if (!Active)
                 return;
 
+            // Get lens offset from PassthroughCameraAccess intrinsics.
+            // This is the physical offset from eye center to RGB camera lens.
+            var cam = FindAnyObjectByType<PassthroughCameraAccess>();
+            Vector3    lensPos = Vector3.zero;
+            Quaternion lensRot = Quaternion.identity;
+            if (cam != null) {
+                lensPos = cam.Intrinsics.LensOffset.position;
+                lensRot = cam.Intrinsics.LensOffset.rotation;
+            }
+            
             // 1. Acquire depth image on main thread (required by OpenXR).
             //    This calls acquire_depth_unity_thread() which calls
             //    xrAcquireEnvironmentDepthImageMETA and stores the pending readback.
             long displayTimeNs = ILLIXRXrHandleProvider.GetPredictedDisplayTimeNs();
-            ILLIXRBridge.illixr_acquire_depth(displayTimeNs);
+            ILLIXRBridge.illixr_acquire_depth(displayTimeNs,
+                lensPos.x, lensPos.y, lensPos.z,
+                lensRot.x, lensRot.y, lensRot.z, lensRot.w);
 
             // 2. Submit the Vulkan copy on the render thread via GL.IssuePluginEvent.
             //    This call blocks until the render thread finishes submit_depth_readback(),
