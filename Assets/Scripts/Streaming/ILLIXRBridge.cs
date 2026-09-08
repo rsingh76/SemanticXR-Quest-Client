@@ -99,7 +99,8 @@ public static class ILLIXRBridge
         long   predictedDisplayTimeNs,
         double ovrPluginTimeSec,
         float[] rgbCameraPoseLh,
-        float[] headPoseLh);
+        float[] headPoseLh,
+        float[] trackingToWorld);
     
     /// <summary>
     /// Returns the native render event callback pointer for use with

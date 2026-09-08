@@ -108,11 +108,15 @@ namespace SemanticXR
                                  $"Orchestrator={Orchestrator != null} " +
                                  $"captureTimeNs={captureOvrTimeSec}");
             }
-
-            float[] headArr = MatrixToArray(headPose);
-            float[] rgbArr  = MatrixToArray(rgbPose);
-
-            ILLIXRBridge.illixr_acquire_depth(displayTimeNs, ovrTimeSec, rgbArr, headArr);
+            
+            // tracking-to-world transform — same as StreamingOrchestrator line 409
+            Matrix4x4 trackingToWorld = Matrix4x4.identity;
+            var rig = FindAnyObjectByType<OVRCameraRig>();
+            if (rig != null && rig.trackingSpace != null)
+                trackingToWorld = rig.trackingSpace.localToWorldMatrix;
+            
+            ILLIXRBridge.illixr_acquire_depth(displayTimeNs, ovrTimeSec, MatrixToArray(rgbPose),
+                MatrixToArray(headPose), MatrixToArray(trackingToWorld));
             GL.IssuePluginEvent(illixr_get_render_event_callback(), EVENT_ACQUIRE);
             ILLIXRBridge.illixr_release_depth();
         }
