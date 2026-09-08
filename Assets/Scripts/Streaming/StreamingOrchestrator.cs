@@ -222,6 +222,7 @@ namespace SemanticXR.Streaming
                 acquirerObj.transform.SetParent(transform);
                 _depthAcquirer = acquirerObj.AddComponent<ILLIXRDepthAcquirer>();
 
+                _depthAcquirer.Orchestrator = this;
                 Debug.Log("[StreamingOrchestrator] ILLIXR transport — Unity capture disabled");
                 return;
             }
@@ -655,6 +656,59 @@ namespace SemanticXR.Streaming
         static extern OVRPlugin.Result ovrp_GetNodePoseStateAtTime(
             double time, OVRPlugin.Node nodeId, out OVRPlugin.PoseStatef nodePoseState);
 
+        public bool TryGetRgbCameraPose(out Matrix4x4 pose) {
+            pose = Matrix4x4.identity;
+
+            if (_cam != null && _cam.IsPlaying) {
+                // Full path: use actual camera timestamp for accurate pose
+                long tsNs = 0;
+                if (_camTimestampNsField != null) {
+                    try { tsNs = (long)_camTimestampNsField.GetValue(_cam); }
+                    catch { }
+                }
+                if (tsNs > 0 && TryGetPoseAtImageTimestamp(tsNs, out var p)) {
+                    pose = Matrix4x4.TRS(p.position, p.rotation, Vector3.one);
+                    return true;
+                }
+            }
+
+            // Fallback for ILLIXR transport where _cam is not initialized:
+            // use Camera.main at current time. The C++ plugin samples this at
+            // ~90Hz so the pose will be close to the actual capture time.
+            if (Camera.main != null) {
+                pose = Camera.main.transform.localToWorldMatrix;
+                return true;
+            }
+
+            return false;
+        }      
+        
+        /// <summary>
+        /// Look up the RGB camera pose at a specific XrTime (nanoseconds).
+        /// Uses the same ovrp_GetNodePoseStateAtTime path as TryGetPoseAtImageTimestamp
+        /// but accepts an XrTime directly rather than a Camera2 sensor timestamp.
+        /// </summary>
+        public bool TryGetRgbCameraPoseAtTime(double ovrTimeSec, out Matrix4x4 pose) {
+            pose = Matrix4x4.identity;
+            if (ovrTimeSec <= 0.0) return false;
+
+            if (!ovrp_GetNodePoseStateAtTime(ovrTimeSec, OVRPlugin.Node.Head,
+                    out OVRPlugin.PoseStatef poseState).IsSuccess())
+                return false;
+
+            var headPose = poseState.Pose.ToOVRPose();
+            Pose cameraPose;
+            if (_cam != null) {
+                var lensOffset = _cam.Intrinsics.LensOffset;
+                cameraPose = new Pose(
+                    headPose.position + headPose.orientation * lensOffset.position,
+                    headPose.orientation * lensOffset.rotation);
+            } else {
+                cameraPose = new Pose(headPose.position, headPose.orientation);
+            }
+            pose = Matrix4x4.TRS(cameraPose.position, cameraPose.rotation, Vector3.one);
+            return true;
+        }        
         bool TryGetPoseAtImageTimestamp(long timestampNsMonotonic, out Pose cameraPose)
         {
             cameraPose = default;
@@ -1019,7 +1073,7 @@ namespace SemanticXR.Streaming
                 var acquirerObj = new GameObject("ILLIXRDepthAcquirer");
                 acquirerObj.transform.SetParent(transform);
                 _depthAcquirer = acquirerObj.AddComponent<ILLIXRDepthAcquirer>();
-
+                _depthAcquirer.Orchestrator = this;
                 Debug.Log("[StreamingOrchestrator] ILLIXR components created");
             }
 

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Runtime.InteropServices;
 using Meta.XR;
+using SemanticXR.Streaming;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -30,10 +31,19 @@ namespace SemanticXR
         [DllImport("unity_android_interface.dbg")]
         static extern IntPtr illixr_get_render_event_callback();
         
+        // Cache PassthroughCameraAccess reference
+        PassthroughCameraAccess _cam;
+
+        public StreamingOrchestrator Orchestrator { get; set; }
+        
         public bool Active { get; set; } = false;
 
         bool _vulkanInitIssued = false;
 
+        void Start()
+        {
+            _cam = FindAnyObjectByType<PassthroughCameraAccess>();
+        }
         void OnEnable()
         {
             if (!_vulkanInitIssued)
@@ -73,32 +83,44 @@ namespace SemanticXR
             if (!Active)
                 return;
 
-            // Get lens offset from PassthroughCameraAccess intrinsics.
-            // This is the physical offset from eye center to RGB camera lens.
-            var cam = FindAnyObjectByType<PassthroughCameraAccess>();
-            Vector3    lensPos = Vector3.zero;
-            Quaternion lensRot = Quaternion.identity;
-            if (cam != null) {
-                lensPos = cam.Intrinsics.LensOffset.position;
-                lensRot = cam.Intrinsics.LensOffset.rotation;
-            }
+            long   displayTimeNs     = ILLIXRXrHandleProvider.GetPredictedDisplayTimeNs();
+            double ovrTimeSec        = OVRPlugin.GetTimeInSeconds();
+            double captureOvrTimeSec = ILLIXRBridge.illixr_get_last_capture_ovr_time_sec();
             
-            // 1. Acquire depth image on main thread (required by OpenXR).
-            //    This calls acquire_depth_unity_thread() which calls
-            //    xrAcquireEnvironmentDepthImageMETA and stores the pending readback.
-            long displayTimeNs = ILLIXRXrHandleProvider.GetPredictedDisplayTimeNs();
-            ILLIXRBridge.illixr_acquire_depth(displayTimeNs,
-                lensPos.x, lensPos.y, lensPos.z,
-                lensRot.x, lensRot.y, lensRot.z, lensRot.w);
+            Debug.Log($"[DepthAcquirer] displayTimeNs={displayTimeNs} " +
+                      $"captureTimeNs={captureOvrTimeSec} " +
+                      $"Orchestrator={Orchestrator != null} " +
+                      $"cam={(_cam != null ? _cam.IsPlaying.ToString() : "null")}");
 
-            // 2. Submit the Vulkan copy on the render thread via GL.IssuePluginEvent.
-            //    This call blocks until the render thread finishes submit_depth_readback(),
-            //    including vkWaitForFences, so the GPU copy is complete when it returns.
+            Matrix4x4 headPose = Camera.main != null
+                ? Camera.main.transform.localToWorldMatrix
+                : Matrix4x4.identity;
+
+            Matrix4x4 rgbPose = Matrix4x4.identity;
+            if (Orchestrator != null && captureOvrTimeSec > 0) {
+                bool gotPose = Orchestrator.TryGetRgbCameraPoseAtTime(
+                    captureOvrTimeSec, out rgbPose);
+                Debug.Log($"[DepthAcquirer] TryGetRgbCameraPoseAtTime: " +
+                          $"gotPose={gotPose} " +
+                          $"pos=({rgbPose.m03:F3},{rgbPose.m13:F3},{rgbPose.m23:F3})");
+            } else {
+                Debug.LogWarning($"[DepthAcquirer] skipping pose lookup: " +
+                                 $"Orchestrator={Orchestrator != null} " +
+                                 $"captureTimeNs={captureOvrTimeSec}");
+            }
+
+            float[] headArr = MatrixToArray(headPose);
+            float[] rgbArr  = MatrixToArray(rgbPose);
+
+            ILLIXRBridge.illixr_acquire_depth(displayTimeNs, ovrTimeSec, rgbArr, headArr);
             GL.IssuePluginEvent(illixr_get_render_event_callback(), EVENT_ACQUIRE);
-
-            // 3. Release the depth image back to the OpenXR runtime on the main thread,
-            //    before xrEndFrame closes the frame.
             ILLIXRBridge.illixr_release_depth();
         }
+        static float[] MatrixToArray(Matrix4x4 m) => new float[] {
+            m.m00, m.m10, m.m20, m.m30,
+            m.m01, m.m11, m.m21, m.m31,
+            m.m02, m.m12, m.m22, m.m32,
+            m.m03, m.m13, m.m23, m.m33,
+        };
     }
 }
