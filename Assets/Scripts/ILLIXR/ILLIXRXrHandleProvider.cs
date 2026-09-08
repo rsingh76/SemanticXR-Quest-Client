@@ -22,6 +22,10 @@ namespace SemanticXR
         UiName            = "ILLIXR XR Handle Provider",
         BuildTargetGroups = new[] { UnityEditor.BuildTargetGroup.Android },
         Company           = "ILLIXR",
+        // Must be explicitly empty, not omitted: FeatureHelpers copies this
+        // attribute field onto the feature verbatim (null included), and Unity's
+        // Quest manifest hook dereferences it with no null check.
+        OpenxrExtensionStrings = "",
         Desc              = "Exposes XrInstance and XrSession handles for ILLIXR native plugins.",
         Version           = "1.0.0",
         FeatureId         = FeatureId)]
